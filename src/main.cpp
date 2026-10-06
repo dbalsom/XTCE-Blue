@@ -437,8 +437,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             }
             test_runner->listFiles();
         }
-        test_runner->runAllTests(cfg.test_max);
-        return SDL_APP_SUCCESS;
+        const bool passed = test_runner->runAllTests(cfg.test_max);
+        delete test_runner;
+        return passed ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
     }
 
 
@@ -490,38 +491,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
     const std::filesystem::path basePath = basePathPtr;
 
-    // const auto fontPath = basePath / "Inter-VariableFont.ttf";
-    // TTF_Font* font = TTF_OpenFont(fontPath.string().c_str(), 36);
-    // if (not font) {
-    //     return SDL_Fail();
-    // }
-    //
-    // // render the font to a surface
-    // const std::string_view text = "Hello SDL!";
-    // SDL_Surface* surfaceMessage = TTF_RenderText_Solid(font, text.data(), text.length(), { 255,255,255 });
-    //
-    // // make a texture from the surface
-    // SDL_Texture* messageTex = SDL_CreateTextureFromSurface(renderer, surfaceMessage);
-    //
-    // // we no longer need the font or the surface, so we can destroy those now.
-    // TTF_CloseFont(font);
-    // SDL_DestroySurface(surfaceMessage);
-
-    // get the on-screen dimensions of the text. this is necessary for rendering it
-    // auto messageTexProps = SDL_GetTextureProperties(messageTex);
-    // SDL_FRect text_rect{
-    //         .x = 0,
-    //         .y = 0,
-    //         .w = float(SDL_GetNumberProperty(messageTexProps, SDL_PROP_TEXTURE_WIDTH_NUMBER, 0)),
-    //         .h = float(SDL_GetNumberProperty(messageTexProps, SDL_PROP_TEXTURE_HEIGHT_NUMBER, 0))
-    // };
-
     // Initialize audio
     SDL_AudioDeviceID audio_device;
     MIX_Mixer* mixer;
     SDL_AudioStream* stream;
     init_audio(&audio_device, &mixer, &stream);
-
 
     // Create a Machine - this represents our emulator core.
     auto machine = new Machine();

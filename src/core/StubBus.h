@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Daniel Balsom
 #pragma once
 
 #include <cstdint>
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <optional>
 
 // Simple stub bus used for testing the Cpu core.
 // - 1 MiB of addressable RAM
@@ -22,6 +25,13 @@ struct StubBus
     const uint8_t* ram() const { return ram_.data(); }
     size_t ramSize() const { return ram_.size(); }
 
+    void setMemory(uint32_t address, uint8_t value) { ram_[address & 0xfffff] = value; }
+
+    // SST's hardware harness supplies NOPs once the tested instruction has
+    // been fetched, including a branch back into its own encoding. Already
+    // prefetched instruction bytes must be deducted by the caller.
+    void setInstructionFetchBytes(size_t remaining) { instruction_fetch_bytes_ = remaining; }
+
     // Start a bus access (address, type) - record for subsequent read/write
     void startAccess(uint32_t address, int type) {
         address_ = address;
@@ -36,6 +46,10 @@ struct StubBus
     // Otherwise (IO port), return 0xFF.
     uint8_t read() {
         if (isMemoryType(type_)) {
+            if (type_ == 4 && instruction_fetch_bytes_) {
+                if (*instruction_fetch_bytes_ == 0) return 0x90;
+                --*instruction_fetch_bytes_;
+            }
             return ram_[address_ & 0xFFFFF];
         }
         // IO port read
@@ -47,7 +61,7 @@ struct StubBus
     // Otherwise (IO port), do nothing.
     void write(uint8_t value) {
         if (isMemoryType(type_)) {
-            ram_[address_ & 0xFFFFF] = value;
+            setMemory(address_, value);
         }
         // IO writes are ignored for stub
     }
@@ -87,6 +101,7 @@ struct StubBus
     // Reset stub state and clear RAM
     void reset() {
         std::fill(ram_.begin(), ram_.end(), 0);
+        instruction_fetch_bytes_.reset();
         address_ = 0;
         type_ = 0;
     }
@@ -100,6 +115,7 @@ private:
     }
 
     std::vector<uint8_t> ram_;
+    std::optional<size_t> instruction_fetch_bytes_;
 
     // Last access parameters recorded by startAccess
     uint32_t address_;

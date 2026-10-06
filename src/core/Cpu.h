@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Andrew Jenner
+// Copyright (C) 2026 Daniel Balsom
 #ifndef CPU_H
 #define CPU_H
 
@@ -6,7 +9,10 @@
 #include <format>
 #include <iomanip>
 #include <iostream>
+#include <span>
+#include <stdexcept>
 #include <string>
+#include <sstream>
 
 #include "../xtce_blue.h"
 #include "Bus.h"
@@ -16,7 +22,7 @@
 #include "microcode.h"
 
 #define LINE_ENDING_SIZE 1
-#define DEBUG_MC 1
+#define DEBUG_MC 0
 
 template <typename BusType = Bus, typename WordT = uint8_t, std::size_t QueueLen = 4>
 class Cpu
@@ -113,13 +119,14 @@ public:
 
     MicrocodeState getMCState() const { return _state; }
     BusType* getBus() { return &_bus; }
-    uint8_t getALU() const { return _alu; }
+    [[nodiscard]] uint8_t getALU() const { return _alu; }
     uint8_t* getRAM() { return _bus.ram(); }
     uint16_t* getMainRegisters() { return &_registers[24]; }
     uint16_t* getRegisters() { return &_registers[0]; }
     void stubInit() { _bus.stubInit(); }
 
-    void setExtents(int logStartCycle, int logEndCycle, int executeEndCycle, int stopIP, int stopSeg) {
+    void setExtents(const int logStartCycle, const int logEndCycle, const int executeEndCycle, const int stopIP,
+                    const int stopSeg) {
         _logStartCycle = logStartCycle + 4;
         _logEndCycle = logEndCycle;
         _executeEndCycle = executeEndCycle;
@@ -144,6 +151,29 @@ public:
     [[nodiscard]] uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
     [[nodiscard]] uint64_t instructionCount() const { return instruction_count_; }
     [[nodiscard]] QueueReadState getQueueStatus() const { return queue_status_; }
+
+    void setBusCycleCapture(bool enabled) { capture_bus_cycles_ = enabled; }
+    [[nodiscard]] const CpuBusCycle& getBusCycle() const { return bus_cycle_; }
+
+    // Call after reset and setting CS:IP, before execution. PC is the BIU's
+    // fetch pointer, so advance it past the bytes already present in the queue.
+    void setPrefetchQueue(std::span<const uint8_t> bytes) {
+        static_assert(sizeof(WordT) == 1, "Byte queue initialization is for the 8088");
+        if (bytes.size() > QueueLen) {
+            throw std::invalid_argument("Initial prefetch queue exceeds CPU capacity");
+        }
+        _queue = 0;
+        _queueBytes = 0;
+        _newQueue.clear();
+        _dequeueing = false;
+        for (const auto byte : bytes) {
+            _newQueue.push_word(byte, pc());
+            _queue |= static_cast<uint32_t>(byte) << (_queueBytes * 8);
+            ++_queueBytes;
+            ++pc();
+        }
+        _queueFilled = bytes.size() == QueueLen;
+    }
 
     [[nodiscard]] std::string log() const {
         // Assemble buffered lines into a single string on request
@@ -177,6 +207,7 @@ public:
         _alu = 0;
         _aluInput = 0;
         _queueBytes = 0;
+        _queueFilled = false;
         _queue = 0;
         _newQueue = {};
         _segmentOverride = -1;
@@ -194,6 +225,7 @@ public:
         _queueFlushing = false;
         _lastIOType = ioPassive;
         _t5 = false;
+        _t6 = false;
         _interruptPending = false;
         _ready = true;
         //_cyclesUntilCanLowerQueueFilled = 0;
@@ -217,6 +249,9 @@ public:
         _state = stateRunning;
         queue_status_ = QueueReadState::NoOperation;
         next_queue_status_ = QueueReadState::NoOperation;
+        next_queue_byte_ = 0;
+        bus_cycle_ = {};
+        bus_segment_status_ = 4;
         _inst_address = 0;
         instruction_count_ = 0;
         _history.clear();
@@ -365,7 +400,7 @@ private:
         _registers[21] = 0xffff;
         _registers[23] = 0;
 
-        std::cout << "CPU initializing." << std::endl;
+        // std::cout << "CPU initializing." << std::endl;
 
         // Initialize the microcode data and put it in a format more suitable for interpreting
 
@@ -674,6 +709,7 @@ private:
         assert(q1 == q2);
         _dequeueing = true;
         next_queue_status_ = qs;
+        next_queue_byte_ = q1;
         _snifferDecoder.queueOperation(qs);
         return q1;
     }
@@ -843,9 +879,6 @@ private:
         if ((_group & groupByteOrWordAccess) == 0) {
             _wordSize = false; // Just for XLAT
         }
-        if (_testNumber == 77) {
-            std::cout << "Foo";
-        }
         readFlags();
         // Default is ADD tmpa (12) (assumed in EA calculations)
         _alu = 0;
@@ -976,7 +1009,8 @@ private:
 
     uint16_t doALU() {
         uint16_t t;
-        uint32_t a = _registers[_aluInput + 12], v;
+        const uint32_t a = _registers[_aluInput + 12];
+        uint32_t v = 0;
         switch (_alu) {
             case 0x00: // ADD
             case 0x02: // ADC
@@ -992,18 +1026,10 @@ private:
             case 0x06: // XOR
                 return bitwise(a ^ tmpb());
             case 0x08: // ROL
-                if (_testNumber == 77) {
-                    std::cout << "Foo";
-                }
                 return doRotate((a << 1) | (topBit(a) ? 1 : 0), a, topBit(a));
             case 0x09: // ROR
                 return doRotate(((a & wordMask()) >> 1) | topBit(lowBit(a)), a, lowBit(a));
             case 0x0a: // LRCY
-
-                if (a == 0xAD61) {
-                    // break here
-                    // std::cout << " have 0xAD61\n";
-                }
                 return doRotate((a << 1) | (_carry ? 1 : 0), a, topBit(a));
             case 0x0b: // RRCY
                 return doRotate(((a & wordMask()) >> 1) | topBit(_carry), a, lowBit(a));
@@ -1033,15 +1059,13 @@ private:
                     break;
                 }
             case 0x15: // DAS
-                {
-                    _carry = _carry || a > (_auxiliary ? 0x9fU : 0x99U);
-                    _auxiliary = _auxiliary || (a & 0x0f) > 9;
+                _carry = _carry || a > (_auxiliary ? 0x9fU : 0x99U);
+                _auxiliary = _auxiliary || (a & 0x0f) > 9;
 
-                    v = a - (_auxiliary ? 0x06 : 0) - (_carry ? 0x60 : 0);
-                    _overflow = (a & ~v & 0x80) != 0;
-                    doPZS(v);
-                    break;
-                }
+                v = a - (_auxiliary ? 0x06 : 0) - (_carry ? 0x60 : 0);
+                _overflow = (a & ~v & 0x80) != 0;
+                doPZS(v);
+                break;
             case 0x16: // AAA
                 _carry = (_auxiliary || (a & 0xf) > 9);
                 _auxiliary = _carry;
@@ -1078,6 +1102,8 @@ private:
                 return a + 2; // flags never updated
             case 0x1d: // DEC2
                 return a - 2; // flags never updated
+            default:
+                break;
         }
         return v;
     }
@@ -1136,11 +1162,13 @@ private:
             case 22: // CR
                 _wordSize = true; // HACK: not sure how this happens for INT0 on the hardware
                 return _microcodePointer & 0xf;
+            default:
+                break;
         }
         return _registers[_source];
     }
 
-    void writeDestination(uint32_t v) {
+    void writeDestination(const uint32_t v) {
         switch (_destination) {
             case 8: // A (AL)
             case 9: // C (CL)? - not used
@@ -1357,6 +1385,8 @@ private:
                     case 8: // WAIT
                         // Don't know what this does!
                         break;
+                    default:
+                        break;
                 }
                 doSecondMisc();
                 break;
@@ -1366,11 +1396,12 @@ private:
             case 5: // long jump or call
             case 7:
                 {
-                    int mc_ptr = (((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2) >> 2;
+                    const int mc_ptr =
+                        (((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2) >> 2;
 
-                    if (mc_ptr == 0x1c5) {
-                        std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
-                    }
+                    // if (mc_ptr == 0x1c5) {
+                    //     std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
+                    // }
 
                     if (!condition(_operands >> 4)) {
                         break;
@@ -1700,6 +1731,7 @@ private:
     void simulateCycle() {
         // QS pins report the queue operation performed during the previous cycle.
         queue_status_ = next_queue_status_;
+        const auto queue_byte = next_queue_byte_;
         next_queue_status_ = QueueReadState::NoOperation;
         BusState nextState = _busState;
         const bool write = _ioType == ioWriteMemory || _ioType == ioWritePort;
@@ -1716,6 +1748,9 @@ private:
                 break;
             case t2:
                 _snifferDecoder.setStatusHigh(_ioSegment);
+                // The EU can prepare another transfer before this one's T4.
+                // S4:S3 retain the segment latched on this transfer's T2.
+                bus_segment_status_ = _ioSegment == 0 ? 0 : _ioSegment == 2 ? 1 : _ioSegment == 3 ? 3 : 2;
                 _snifferDecoder.setBusOperation(static_cast<int>(_ioType));
                 if (write) {
                     _snifferDecoder.setData(_ioWriteData);
@@ -1747,6 +1782,52 @@ private:
                 _t4 = true;
                 break;
         }
+
+        if (capture_bus_cycles_) {
+            // Capture a CPU cycle snapshot for SST validation
+            bus_cycle_ = {};
+            static constexpr CpuBusCycle::Phase phases[] = {CpuBusCycle::Phase::T1, CpuBusCycle::Phase::T2,
+                                                            CpuBusCycle::Phase::T3, CpuBusCycle::Phase::Wait,
+                                                            CpuBusCycle::Phase::T4, CpuBusCycle::Phase::Idle};
+            bus_cycle_.phase = phases[_busState];
+            bus_cycle_.ale = _busState == t1;
+
+            if (_busState != tIdle) {
+                bus_cycle_.address = _ioAddress & 0xfffff;
+            }
+
+            bus_cycle_.bus_status =
+                (_busState == t1 || _busState == t2 || ((_busState == t3 || _busState == tWait) && !_ready))
+                ? _ioType
+                : ioPassive;
+
+            if (_busState != t1 && _busState != tIdle) {
+                bus_cycle_.segment_status = bus_segment_status_;
+            }
+
+            const bool data_phase = _busState == t3 || _busState == tWait;
+            const auto transfer = data_phase && _ready ? _lastIOType : _ioType;
+
+            if (_busState == t2 || data_phase) {
+                const uint8_t strobes = write ? (_busState == t2 ? 2 : 3) : 4;
+
+                if (transfer == ioPrefetch || transfer == ioReadMemory || transfer == ioWriteMemory) {
+                    bus_cycle_.memory_status = strobes;
+                }
+                else if (transfer == ioReadPort || transfer == ioWritePort) {
+                    bus_cycle_.io_status = strobes;
+                }
+
+                bus_cycle_.data_valid = data_phase && _ready;
+                if (bus_cycle_.data_valid) {
+                    bus_cycle_.data = _ioReadData;
+                }
+            }
+
+            bus_cycle_.queue_status = queue_status_;
+            bus_cycle_.queue_byte = queue_byte;
+        }
+
         if (_dequeueing) {
             _dequeueing = false;
             _queue >>= 8;
@@ -2526,14 +2607,14 @@ private:
                 return false;
             }
 
-            if (std::is_same<WordT, uint8_t>::value) {
-                uint8_t b = static_cast<uint8_t>(word);
+            if (std::is_same_v<WordT, uint8_t>) {
+                const auto b = static_cast<uint8_t>(word);
                 return push(b, address);
             }
 
-            const uint16_t w = static_cast<uint16_t>(word);
-            const uint8_t lo = static_cast<uint8_t>(w & 0x00FFu);
-            const uint8_t hi = static_cast<uint8_t>((w >> 8) & 0x00FFu);
+            const auto w = static_cast<uint16_t>(word);
+            const auto lo = static_cast<uint8_t>(w & 0x00FFu);
+            const auto hi = static_cast<uint8_t>((w >> 8) & 0x00FFu);
 
             // We already know we have room.
             push(lo, address);
@@ -2541,7 +2622,7 @@ private:
             return true;
         }
 
-        std::string getQueueString() const {
+        [[nodiscard]] std::string getQueueString() const {
             std::ostringstream oss;
 
             // Print each byte from oldest (tail) to newest (head)
@@ -2571,19 +2652,18 @@ private:
             return out;
         }
 
-        bool isAtPolicyLen() const {
+        [[nodiscard]] bool isAtPolicyLen() const {
             const size_type sz = size_;
             const size_type cap = QueueLen;
 
-            if (std::is_same<WordT, uint8_t>::value) {
+            if (std::is_same_v<WordT, uint8_t>) {
                 // 8088: queue is "almost full" when it has capacity-1 bytes
                 return (sz == cap - 1);
             }
-            else {
-                // 8086: queue is "almost full" when size is cap-1 or cap-2
-                // (since fetch requires 2-byte room)
-                return (sz == cap - 1) || (sz == cap - 2);
-            }
+
+            // 8086: queue is "almost full" when size is cap-1 or cap-2
+            // (since fetch requires 2-byte room)
+            return (sz == cap - 1) || (sz == cap - 2);
         }
 
         void check(const uint32_t expected) const {
@@ -2633,17 +2713,17 @@ private:
             size_ = 0;
         }
 
-        size_type len() const { return size_; }
+        [[nodiscard]] size_type len() const { return size_; }
 
-        size_type capacity() { return capacity_; }
+        [[nodiscard]] size_type capacity() const { return capacity_; }
 
-        bool isEmpty() const { return size_ == 0; }
+        [[nodiscard]] bool isEmpty() const { return size_ == 0; }
 
-        bool full() const { return head_ == tail_; }
+        [[nodiscard]] bool full() const { return head_ == tail_; }
 
-        size_type freeSpace() const { return QueueLen - size_; }
+        [[nodiscard]] size_type freeSpace() const { return QueueLen - size_; }
 
-        bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
+        [[nodiscard]] bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
 
         // Push a single entry (byte + address). Returns false if full.
         bool push(InstructionHistoryEntry entry) {
@@ -2796,6 +2876,10 @@ private:
     bool _in_instruction{false};
     QueueReadState queue_status_{QueueReadState::NoOperation};
     QueueReadState next_queue_status_{QueueReadState::NoOperation};
+    uint8_t next_queue_byte_ = 0;
+    bool capture_bus_cycles_ = false;
+    CpuBusCycle bus_cycle_{};
+    uint8_t bus_segment_status_ = 4;
     bool _nx{false}; // Microcode signal to read next instruction early (1-cycle pipeline)
     MicrocodeState _state;
     int _source;

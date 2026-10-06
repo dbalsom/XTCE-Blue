@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Daniel Balsom
 #pragma once
 
 #include <string>
@@ -83,6 +85,7 @@ private:
         int cycles_taken; // cycles executed
         size_t test_index; // test index
         std::string test_name; // test name
+        std::string test_hash;
         std::string message; // human-readable failure message
         std::vector<uint16_t> regs; // snapshot of REG16 registers in Moo::REG16 order
         std::deque<std::string> cycle_logs; // per-cycle logs (if any)
@@ -98,6 +101,12 @@ private:
         size_t reg_failed = 0;
         size_t mem_failed = 0;
         size_t flag_failed = 0; // special-case register failures for FLAGS
+        size_t ip_failed = 0;
+        size_t timing_failed = 0;
+        size_t bus_failed = 0;
+        size_t queue_failed = 0;
+        size_t timeout_failed = 0;
+        size_t details_saved = 0;
     };
 
     std::unordered_map<std::string, FileSummary> file_summaries_;
