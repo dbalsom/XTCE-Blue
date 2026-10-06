@@ -15,6 +15,8 @@
 #define ROM_BASE_ADDRESS 0xFE000
 #define CONVENTIONAL_RAM_SIZE 0xB8000
 #define CGA_ADDRESS 0xB8000
+// The 32 KiB CPU aperture mirrors CGA's 16 KiB VRAM (address bit 14 is ignored).
+#define CGA_APERTURE_SIZE 0x8000
 
 class Bus
 {
@@ -54,7 +56,7 @@ public:
             }
             return 0xff;
         }
-        if (address >= CGA_ADDRESS && address < CGA_ADDRESS + 0x4000) {
+        if (address >= CGA_ADDRESS && address < CGA_ADDRESS + CGA_APERTURE_SIZE) {
             return cga_.readMem(address - CGA_ADDRESS);
         }
         if (address >= CONVENTIONAL_RAM_SIZE) {
@@ -114,11 +116,13 @@ public:
 
     void tick() {
         _ticks++;
-        cga_.tick();
+        for (int i = 0; i < 3; ++i) {
+            cga_.tick();
+        }
         cga_phase_ = (cga_phase_ + 3) & 0x0f;
         pit_phase_++;
 
-        // Handle PIT updates every 4 ticks
+        // Handle PIT updates every 4 CPU cycles.
         if (pit_phase_ == 4) {
             pit_phase_ = 0;
             pit_.tick();
@@ -381,7 +385,7 @@ public:
             if (address_ < CONVENTIONAL_RAM_SIZE) {
                 ram_[address_] = data;
             }
-            else if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + 0x4000) {
+            else if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + CGA_APERTURE_SIZE) {
                 cga_.writeMem(address_ - CGA_ADDRESS, data);
             }
         }
@@ -454,7 +458,7 @@ public:
             // Read from ROM.
             return rom_[address_ - ROM_BASE_ADDRESS];
         }
-        if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + 0x4000) {
+        if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + CGA_APERTURE_SIZE) {
             return cga_.readMem(address_ - CGA_ADDRESS);
         }
         // No match? Return open bus.
