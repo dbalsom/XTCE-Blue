@@ -143,6 +143,7 @@ public:
     void setInitialIP(const int v) { pc() = v; }
     [[nodiscard]] uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
     [[nodiscard]] uint64_t instructionCount() const { return instruction_count_; }
+    [[nodiscard]] QueueReadState getQueueStatus() const { return queue_status_; }
 
     [[nodiscard]] std::string log() const {
         // Assemble buffered lines into a single string on request
@@ -210,6 +211,12 @@ public:
         _overflow = false;
 
         // Instruction tracking
+        _rni = false;
+        _nx = false;
+        _in_instruction = false;
+        _state = stateRunning;
+        queue_status_ = QueueReadState::NoOperation;
+        next_queue_status_ = QueueReadState::NoOperation;
         _inst_address = 0;
         instruction_count_ = 0;
         _history.clear();
@@ -666,6 +673,7 @@ private:
         }
         assert(q1 == q2);
         _dequeueing = true;
+        next_queue_status_ = qs;
         _snifferDecoder.queueOperation(qs);
         return q1;
     }
@@ -1012,55 +1020,25 @@ private:
                 return doPass(a);
             case 0x14: // DAA
                 {
-                    const bool old_af = _auxiliary;
-                    const bool old_cf = _carry;
-                    t = a;
-                    auto adj = 0;
+                    const auto al = static_cast<uint8_t>(a);
+                    const bool low_gt9 = (al & 0x0f) > 9;
 
-                    // Extremely funky undefined OF behavior (from MartyPC)
-                    _overflow = (a <= 0x7f) && ((!old_cf && a >= 0x7A) || (old_cf && a >= 0x1A));
+                    // Calculate CF before modifying AF.
+                    _carry = _carry || (al >> 4) > 9 || ((al >> 4) == 9 && low_gt9 && !_auxiliary);
+                    _auxiliary = _auxiliary || low_gt9;
 
-                    if (old_af || (a & 0x0f) > 9) {
-                        adj = 6;
-                        t = a + adj;
-                        //_overflow = topBit(t & (t ^ a));
-                        _auxiliary = true;
-                    }
-                    if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                        adj = 0x60;
-                        v = t + adj;
-                        //_overflow = topBit(v & (v ^ t));
-                        _carry = true;
-                    }
-                    else {
-                        v = t;
-                    }
-                    //_overflow = (a ^ v) & (adj ^ v) & 0x80 != 0;
+                    v = (al + (_auxiliary ? 0x06 : 0) + (_carry ? 0x60 : 0)) & 0xff;
+                    _overflow = (al & 0x80) == 0 && (v & 0x80) != 0;
                     doPZS(v);
                     break;
                 }
             case 0x15: // DAS
                 {
-                    bool old_af = _auxiliary;
-                    t = a;
-                    auto adj = 0;
-                    if (old_af || (a & 0x0f) > 9) {
-                        t = a - 6;
-                        adj = 6;
-                        //_overflow = topBit(a & (t ^ a));
-                        _auxiliary = true;
-                    }
-                    if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                        v = t - 0x60;
-                        adj = 0x60;
-                        //_overflow = topBit(t & (v ^ t));
-                        _carry = true;
-                    }
-                    else {
-                        v = t;
-                    }
-                    // More undefined overflow flag fun!
-                    _overflow = ((a ^ adj) & (a ^ v) & 0x80) != 0;
+                    _carry = _carry || a > (_auxiliary ? 0x9fU : 0x99U);
+                    _auxiliary = _auxiliary || (a & 0x0f) > 9;
+
+                    v = a - (_auxiliary ? 0x06 : 0) - (_carry ? 0x60 : 0);
+                    _overflow = (a & ~v & 0x80) != 0;
                     doPZS(v);
                     break;
                 }
@@ -1113,17 +1091,18 @@ private:
     uint32_t readSource() {
         uint32_t v;
         switch (_source) {
-            case 7: { // Q
-                if (_queueBytes == 0) {
-                    _state = stateWaitingForQueueData;
-                    return 0;
+            case 7:
+                { // Q
+                    if (_queueBytes == 0) {
+                        _state = stateWaitingForQueueData;
+                        return 0;
+                    }
+                    const uint8_t data = queueRead(QueueReadState::SubsequentByte);
+                    if (_opcode == 0xcd && data == software_interrupt_breakpoint_) {
+                        _breakpointHit = true;
+                    }
+                    return data;
                 }
-                const uint8_t data = queueRead(QueueReadState::SubsequentByte);
-                if (_opcode == 0xcd && data == software_interrupt_breakpoint_) {
-                    _breakpointHit = true;
-                }
-                return data;
-            }
             case 8: // A (AL)
             case 9: // C (CL)? - not used
             case 10: // E (DL)? - not used
@@ -1350,6 +1329,7 @@ private:
                         _queueBytes = 0;
                         _queue = 0;
                         _newQueue.clear();
+                        next_queue_status_ = QueueReadState::Flush;
                         _snifferDecoder.queueOperation(QueueReadState::Flush);
                         _queueFlushing = true;
                         break;
@@ -1718,6 +1698,9 @@ private:
 
     // Execute one CPU cycle.
     void simulateCycle() {
+        // QS pins report the queue operation performed during the previous cycle.
+        queue_status_ = next_queue_status_;
+        next_queue_status_ = QueueReadState::NoOperation;
         BusState nextState = _busState;
         const bool write = _ioType == ioWriteMemory || _ioType == ioWritePort;
         _t6 = _t5;
@@ -2811,6 +2794,8 @@ private:
     uint64_t instruction_count_{0};
     bool _inst_boundary{false};
     bool _in_instruction{false};
+    QueueReadState queue_status_{QueueReadState::NoOperation};
+    QueueReadState next_queue_status_{QueueReadState::NoOperation};
     bool _nx{false}; // Microcode signal to read next instruction early (1-cycle pipeline)
     MicrocodeState _state;
     int _source;
