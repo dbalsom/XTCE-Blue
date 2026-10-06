@@ -1,19 +1,19 @@
 #ifndef CPU_H
 #define CPU_H
 
-#include <iostream>
-#include <iomanip>
-#include <string>
-#include <format>
 #include <SDL3/SDL_log.h>
 #include <deque>
+#include <format>
+#include <iomanip>
+#include <iostream>
+#include <string>
 
 #include "../xtce_blue.h"
 #include "Bus.h"
 #include "SnifferDecoder.h"
 
-#include "microcode.h"
 #include "cpu_types.h"
+#include "microcode.h"
 
 #define LINE_ENDING_SIZE 1
 #define DEBUG_MC 1
@@ -23,11 +23,8 @@ class Cpu
 {
 
     static constexpr int OFF_RAILS_CT = 20;
-    static_assert(
-        std::is_same<WordT, uint8_t>::value ||
-        std::is_same<WordT, uint16_t>::value,
-        "Cpu WordT must be uint8_t or uint16_t"
-        );
+    static_assert(std::is_same_v<WordT, uint8_t> || std::is_same_v<WordT, uint16_t>,
+                  "Cpu WordT must be uint8_t or uint16_t");
     static_assert(QueueLen > 0, "QueueLen must be > 0");
 
     enum GroupDecodeFlags
@@ -64,7 +61,13 @@ class Cpu
     };
 
 public:
-    enum class RunResult { Ok, Halt, BreakpointHit, OffRails };
+    enum class RunResult
+    {
+        Ok,
+        Halt,
+        BreakpointHit,
+        OffRails
+    };
 
     enum MicrocodeState
     {
@@ -100,15 +103,11 @@ public:
     };
 
     // Default constructor: default-construct the bus and initialize CPU state
-    Cpu() :
-        _consoleLogging(false), _bus() {
-        initializeCommon();
-    }
+    Cpu() : _consoleLogging(false), _bus() { initializeCommon(); }
 
     // Forwarding constructor: allow callers to construct CpuT with arguments forwarded to BusType's constructor.
     template <typename... Args>
-    explicit Cpu(Args&&... args) :
-        _consoleLogging(false), _bus(std::forward<Args>(args)...) {
+    explicit Cpu(Args&&... args) : _consoleLogging(false), _bus(std::forward<Args>(args)...) {
         initializeCommon();
     }
 
@@ -128,9 +127,7 @@ public:
         _stopSeg = stopSeg;
     }
 
-    void setLogInstructions(const bool state) {
-        _log_instructions = state;
-    }
+    void setLogInstructions(const bool state) { _log_instructions = state; }
 
     bool isLogInstructions() const { return _log_instructions; }
 
@@ -139,18 +136,14 @@ public:
         _bad_opcode_ct = badOpcodeCt;
     }
 
-    std::vector<InstructionHistoryEntry> getHistory(size_t lines) {
-        return _history.getLast(lines);
-    }
+    std::vector<InstructionHistoryEntry> getHistory(size_t lines) { return _history.getLast(lines); }
 
-    uint16_t getInstructionPointer() const {
-        return _inst_address;
-    }
+    [[nodiscard]] uint16_t getInstructionPointer() const { return _inst_address; }
 
     void setInitialIP(const int v) { pc() = v; }
-    uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
+    [[nodiscard]] uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
 
-    std::string log() const {
+    [[nodiscard]] std::string log() const {
         // Assemble buffered lines into a single string on request
         std::string out;
         for (const auto& s : _logBuffer) {
@@ -266,9 +259,7 @@ public:
         while ((getRealIP() != _stopIP + 2 || cs() != _stopSeg) && _cycle < _executeEndCycle);
     }
 
-    void setConsoleLogging() {
-        _consoleLogging = true;
-    }
+    void setConsoleLogging() { _consoleLogging = true; }
 
     // Run CPU cycles until the next instruction boundary is reached.
     // Returns the number of CPU cycles executed.
@@ -292,21 +283,13 @@ public:
         return cycles;
     }
 
-    void setRegister(const Register r, const uint16_t v) {
-        _registers[reg_to_idx(r)] = v;
-    }
+    void setRegister(const Register r, const uint16_t v) { _registers[reg_to_idx(r)] = v; }
 
-    uint16_t getRegister(const Register r) const {
-        return _registers[reg_to_idx(r)];
-    }
+    uint16_t getRegister(const Register r) const { return _registers[reg_to_idx(r)]; }
 
-    uint16_t getRealIP() {
-        return pc() - _queueBytes;
-    }
+    uint16_t getRealIP() { return pc() - _queueBytes; }
 
-    void setTestNumber(uint32_t n) {
-        _testNumber = n;
-    }
+    void setTestNumber(uint32_t n) { _testNumber = n; }
 
     // Breakpoint API
     void setBreakpoint(const uint16_t cs, const uint16_t ip) {
@@ -353,7 +336,6 @@ private:
             // if required.
             _byteRegisters[i] = &byteData[byteNumbers[i] ^ bigEndian];
         }
-
     }
 
     // Extracted common initialization logic so we can reuse it in all constructors.
@@ -371,7 +353,9 @@ private:
         // Initialize the microcode data and put it in a format more suitable for interpreting
 
         // Select 8086 based on template WordT parameter.
-        static const bool use8086 = std::is_same<WordT, uint16_t>::value;
+        static constexpr bool use8086 = std::is_same_v<WordT, uint16_t>;
+        const std::string_view microcodeRomLeft = use8086 ? MICROCODE_ROM_LEFT_8086 : MICROCODE_ROM_LEFT_8088;
+        const std::string_view microcodeRomRight = use8086 ? MICROCODE_ROM_RIGHT_8086 : MICROCODE_ROM_RIGHT_8088;
 
         // Initialize an array to hold the 512 21-bit microcode instruction words.
         uint32_t instructions[512];
@@ -384,9 +368,7 @@ private:
         for (int y = 0; y < 84; ++y) {
             // Iterate through left and right columns.
             for (int half = 0; half < 2; ++half) {
-                std::string filename = (half == 1 ? "l" : "r");
-                filename += (use8086 ? "a" : "");
-                std::string_view s = get_file(filename);
+                const std::string_view s = half == 1 ? microcodeRomLeft : microcodeRomRight;
                 // Iterate through the width of the ROM block (64).
                 for (int x = 0; x < 64; ++x) {
                     int b = s[y * (64 + LINE_ENDING_SIZE) + (63 - x)] == '0' ? 1 : 0;
@@ -446,37 +428,23 @@ private:
         // To implement efficient microcode lookups, we expand the PLA data into a full 11-bit (2048-entry) lookup
         // table, _microcodeIndex. This LUT is by nature sparse, but we shouldn't ever attempt to access a non-mapped
         // entry during normal operation.
-        int stage1[128];
-        for (int x = 0; x < 128; ++x) {
-            stage1[x] = 0;
-        }
-        for (int g = 0; g < 9; ++g) {
-            // Width of each ROM file is 16, except for groups 0 and 8 which are 8.
-            int n = 16;
-            if (g == 0 || g == 8) {
-                n = 8;
-            }
+        int stage1[128]{};
 
-            // This array provides the X bit position offset for each group.
-            int xx[9] = {0, 8, 24, 40, 56, 72, 88, 104, 120};
-            int xp = xx[g];
-
-            // Iterate through top and bottom halves of each ROM file.
-            for (int h = 0; h < 2; ++h) {
-                std::string filename = decimal(g) + (h == 0 ? "t" : "b") + ".txt";
+        // The top and bottom decoder images combine the former nine horizontal fragments into full-width rows.
+        for (int h = 0; h < 2; ++h) {
+            constexpr int decoderHeight = 11;
 #if DEBUG_MC
-                std::cout << "Loading microcode file: " << filename << std::endl;
+            std::cout << "Loading " << (h == 0 ? "top" : "bottom") << " microcode decoder" << std::endl;
 #endif
-                std::string_view s = get_file(filename);
+            const std::string_view decoder = h == 0 ? MICROCODE_DECODER_TOP : MICROCODE_DECODER_BOTTOM;
 
-                // Iterate through the height of each ROM file (11 rows).
-                for (int y = 0; y < 11; ++y) {
-                    for (int x = 0; x < n; ++x) {
-                        int b = s[y * (n + LINE_ENDING_SIZE) + x] == '0' ? 1 : 0;
-                        if (b != 0) {
-                            // Stage1 is written in reverse-order.
-                            stage1[127 - (x + xp)] |= 1 << (y * 2 + (h ^ (y <= 2 ? 1 : 0)));
-                        }
+            for (int y = 0; y < decoderHeight; ++y) {
+                constexpr int decoderWidth = 128;
+                for (int x = 0; x < decoderWidth; ++x) {
+                    const bool programmed = decoder[y * (decoderWidth + LINE_ENDING_SIZE) + x] == '0';
+                    if (programmed) {
+                        // Stage1 is written in reverse-order.
+                        stage1[decoderWidth - 1 - x] |= 1 << (y * 2 + (h ^ (y <= 2 ? 1 : 0)));
                     }
                 }
             }
@@ -520,11 +488,10 @@ private:
         // The inputs vary depending on the type of lookup.
         // For looking up an EA calculation microcode address, the inputs are 5 bits from the ModRM byte.
 
-        std::string translationFile = use8086 ? "translation_8086.txt" : "translation_8088.txt";
 #if DEBUG_MC
-        std::cout << "Loading translation ROM: " << translationFile << std::endl;
+        std::cout << "Loading " << (use8086 ? "8086" : "8088") << " translation ROM" << std::endl;
 #endif
-        std::string_view translationString = get_file(translationFile);
+        const std::string_view translationString = use8086 ? MICROCODE_TRANSLATION_8086 : MICROCODE_TRANSLATION_8088;
         int tsp = 0;
         char c = translationString[0];
 
@@ -585,7 +552,7 @@ private:
 
         int groupInput[38 * 18];
         int groupOutput[38 * 15];
-        std::string_view groupString = get_file("group.txt");
+        constexpr std::string_view groupString = MICROCODE_GROUP_DECODER;
 
         // Iterate through each column of the group decode ROM.
         for (int x = 0; x < 38; ++x) {
@@ -874,8 +841,7 @@ private:
             // EALOAD and EADONE finish with RTN
             _modRM = _nextModRM;
             if ((_group & groupMicrocodePointerFromOpcode) == 0) {
-                _microcodePointer = ((_modRM << 1) & 0x70) | 0xf00 |
-                    ((_opcode & 1) << 12) | ((_opcode & 8) << 4);
+                _microcodePointer = ((_modRM << 1) & 0x70) | 0xf00 | ((_opcode & 1) << 12) | ((_opcode & 8) << 4);
                 _state = stateSingleCycleWait;
             }
             // Check that RM != 11 (which would indicate a register-only operation)
@@ -930,8 +896,7 @@ private:
             _nx = false;
             _state = stateHaltingStart;
             _extraHaltDelay =
-                !((_busState == tIdle && !_t5 && !_t6 && _ioType == ioPassive)
-                    || (_t5 && _lastIOType != ioPrefetch));
+                !((_busState == tIdle && !_t5 && !_t6 && _ioType == ioPassive) || (_t5 && _lastIOType != ioPrefetch));
             return;
         }
         if ((_group & groupCMC) != 0) {
@@ -958,7 +923,6 @@ private:
             }
             return;
         }
-
     }
 
     uint16_t doRotate(uint16_t v, uint16_t a, bool carry) {
@@ -1015,7 +979,7 @@ private:
 
                 if (a == 0xAD61) {
                     // break here
-                    //std::cout << " have 0xAD61\n";
+                    // std::cout << " have 0xAD61\n";
                 }
                 return doRotate((a << 1) | (_carry ? 1 : 0), a, topBit(a));
             case 0x0b: // RRCY
@@ -1029,62 +993,62 @@ private:
             case 0x0f: // SAR
                 return doShift(((a & wordMask()) >> 1) | topBit(topBit(a)), a, lowBit(a), false);
             case 0x10: // PASS
-                //return doShift(a, a, false, false);
+                // return doShift(a, a, false, false);
                 return doPass(a);
             case 0x14: // DAA
-            {
-                const bool old_af = _auxiliary;
-                const bool old_cf = _carry;
-                t = a;
-                auto adj = 0;
+                {
+                    const bool old_af = _auxiliary;
+                    const bool old_cf = _carry;
+                    t = a;
+                    auto adj = 0;
 
-                // Extremely funky undefined OF behavior (from MartyPC)
-                _overflow = (a <= 0x7f) && ((!old_cf && a >= 0x7A) || (old_cf && a >= 0x1A));
+                    // Extremely funky undefined OF behavior (from MartyPC)
+                    _overflow = (a <= 0x7f) && ((!old_cf && a >= 0x7A) || (old_cf && a >= 0x1A));
 
-                if (old_af || (a & 0x0f) > 9) {
-                    adj = 6;
-                    t = a + adj;
-                    //_overflow = topBit(t & (t ^ a));
-                    _auxiliary = true;
+                    if (old_af || (a & 0x0f) > 9) {
+                        adj = 6;
+                        t = a + adj;
+                        //_overflow = topBit(t & (t ^ a));
+                        _auxiliary = true;
+                    }
+                    if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
+                        adj = 0x60;
+                        v = t + adj;
+                        //_overflow = topBit(v & (v ^ t));
+                        _carry = true;
+                    }
+                    else {
+                        v = t;
+                    }
+                    //_overflow = (a ^ v) & (adj ^ v) & 0x80 != 0;
+                    doPZS(v);
+                    break;
                 }
-                if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                    adj = 0x60;
-                    v = t + adj;
-                    //_overflow = topBit(v & (v ^ t));
-                    _carry = true;
-                }
-                else {
-                    v = t;
-                }
-                //_overflow = (a ^ v) & (adj ^ v) & 0x80 != 0;
-                doPZS(v);
-                break;
-            }
             case 0x15: // DAS
-            {
-                bool old_af = _auxiliary;
-                t = a;
-                auto adj = 0;
-                if (old_af || (a & 0x0f) > 9) {
-                    t = a - 6;
-                    adj = 6;
-                    //_overflow = topBit(a & (t ^ a));
-                    _auxiliary = true;
+                {
+                    bool old_af = _auxiliary;
+                    t = a;
+                    auto adj = 0;
+                    if (old_af || (a & 0x0f) > 9) {
+                        t = a - 6;
+                        adj = 6;
+                        //_overflow = topBit(a & (t ^ a));
+                        _auxiliary = true;
+                    }
+                    if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
+                        v = t - 0x60;
+                        adj = 0x60;
+                        //_overflow = topBit(t & (v ^ t));
+                        _carry = true;
+                    }
+                    else {
+                        v = t;
+                    }
+                    // More undefined overflow flag fun!
+                    _overflow = ((a ^ adj) & (a ^ v) & 0x80) != 0;
+                    doPZS(v);
+                    break;
                 }
-                if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                    v = t - 0x60;
-                    adj = 0x60;
-                    //_overflow = topBit(t & (v ^ t));
-                    _carry = true;
-                }
-                else {
-                    v = t;
-                }
-                // More undefined overflow flag fun!
-                _overflow = ((a ^ adj) & (a ^ v) & 0x80) != 0;
-                doPZS(v);
-                break;
-            }
             case 0x16: // AAA
                 _carry = (_auxiliary || (a & 0xf) > 9);
                 _auxiliary = _carry;
@@ -1126,12 +1090,8 @@ private:
     }
 
     void updateFlags() {
-        flags() = (flags() & 0xf702)
-            | (_overflow ? 0x800 : 0)
-            | (_sign ? 0x80 : 0)
-            | (_zero ? 0x40 : 0)
-            | (_auxiliary ? 0x10 : 0)
-            | _parity // Already shifted
+        flags() = (flags() & 0xf702) | (_overflow ? 0x800 : 0) | (_sign ? 0x80 : 0) | (_zero ? 0x40 : 0) |
+            (_auxiliary ? 0x10 : 0) | _parity // Already shifted
             | (_carry ? 1 : 0);
     }
 
@@ -1260,7 +1220,6 @@ private:
                 else {
                     std::cerr << "Unknown destination: " << _destination << std::endl;
                 }
-
         }
     }
 
@@ -1313,7 +1272,7 @@ private:
                 break;
             case 4: // RTN
                 // Normal RTN updates carry?
-                //std::cout << "Setting carry to " << _carry << std::endl;
+                // std::cout << "Setting carry to " << _carry << std::endl;
                 setCF(_carry);
 
                 _microcodePointer = _microcodeReturn;
@@ -1343,8 +1302,7 @@ private:
             case 0: // short jump
                 if (!condition(_operands >> 4))
                     break;
-                _microcodePointer =
-                    (_microcodePointer & 0x1ff0) + (_operands & 0xf);
+                _microcodePointer = (_microcodePointer & 0x1ff0) + (_operands & 0xf);
                 _state = stateSingleCycleWait;
                 break;
             case 1: // precondition ALU
@@ -1359,8 +1317,7 @@ private:
                 if (_alu == 0x11) {
                     // XI
                     readFlags();
-                    _alu = ((((_opcode & 0x80) != 0 ? _modRM : _opcode) >> 3) & 7) |
-                        ((_opcode >> 3) & 8) |
+                    _alu = ((((_opcode & 0x80) != 0 ? _modRM : _opcode) >> 3) & 7) | ((_opcode >> 3) & 8) |
                         ((_group & groupAddSubBooleanRotate) != 0 ? 0 : 0x10);
                 }
                 break;
@@ -1408,35 +1365,32 @@ private:
                 break;
             case 5: // long jump or call
             case 7:
-            {
-                int mc_ptr =
-                (((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                    (_microcodePointer & 3)) << 2) >> 2;
+                {
+                    int mc_ptr = (((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2) >> 2;
 
-                if (mc_ptr == 0x1c5) {
-                    std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
-                }
+                    if (mc_ptr == 0x1c5) {
+                        std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
+                    }
 
-                if (!condition(_operands >> 4)) {
+                    if (!condition(_operands >> 4)) {
+                        break;
+                    }
+                    _skipRNI = false;
+                    if (_type == 7) {
+                        _microcodeReturn = _microcodePointer;
+                    }
+                    _microcodePointer =
+                        _translation[((_type & 2) << 6) + ((_operands << 3) & 0x78) +
+                                     ((_group & groupInitialEARead) == 0 ? 4 : 0) + ((_modRM & 0xc0) == 0 ? 1 : 0)] >>
+                        1;
+
+                    // int mc_ptr_dst =
+                    // (((_microcodeIndex[_microcodePointer >> 2] << 2) +
+                    //     (_microcodePointer & 3)) << 2) >> 2;
+                    // std::cout << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
+                    _state = stateSingleCycleWait;
                     break;
                 }
-                _skipRNI = false;
-                if (_type == 7) {
-                    _microcodeReturn = _microcodePointer;
-                }
-                _microcodePointer = _translation[
-                    ((_type & 2) << 6) +
-                    ((_operands << 3) & 0x78) +
-                    ((_group & groupInitialEARead) == 0 ? 4 : 0) +
-                    ((_modRM & 0xc0) == 0 ? 1 : 0)] >> 1;
-
-                // int mc_ptr_dst =
-                // (((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                //     (_microcodePointer & 3)) << 2) >> 2;
-                //std::cout << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
-                _state = stateSingleCycleWait;
-                break;
-            }
             default:
                 break;
         }
@@ -1474,9 +1428,7 @@ private:
         switch (_state) {
             case stateRunning:
                 _lastMicrocodePointer = _microcodePointer;
-                m = &_microcode[
-                    ((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                        (_microcodePointer & 3)) << 2];
+                m = &_microcode[((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2];
                 advanceMicrocodePointer();
                 _destination = m[0];
                 _source = m[1];
@@ -1540,33 +1492,33 @@ private:
                 break;
 
             case stateWaitingUntilFirstByteCanStart:
-            {
-                if (_ioType != ioPassive) {
-                    // Bus is busy
+                {
+                    if (_ioType != ioPassive) {
+                        // Bus is busy
+                        break;
+                    }
+                    _ioWriteData = opr() & 0xff;
+                    _ioSegment = (_operands >> 2) & 3;
+                    auto base_segment = ((_group & groupEffectiveAddress) != 0) ? _segment : _ioSegment;
+                    if (_ioSegment == 3) {
+                        // If segment is DS, use the segment override if present
+                        _ioSegment = (_segmentOverride != -1) ? _segmentOverride : base_segment;
+                    }
+                    else {
+                        // This is a no-segment access (IVT read or I/O).
+                        // We use register slot 9 because it's a register slot that stays as all-zero bits, and has the
+                        // same low two bits (so that the logs show the right segment).
+                        if (_ioSegment == 1) {
+                            _ioSegment = 9;
+                        }
+                    }
+                    _ioIndex = ind();
+                    _ioAddress = physicalAddress(_ioSegment, _ioIndex);
+
+                    _state = stateWaitingUntilFirstByteDone;
+                    busStart();
                     break;
                 }
-                _ioWriteData = opr() & 0xff;
-                _ioSegment = (_operands >> 2) & 3;
-                auto base_segment = ((_group & groupEffectiveAddress) != 0) ? _segment : _ioSegment;
-                if (_ioSegment == 3) {
-                    // If segment is DS, use the segment override if present
-                    _ioSegment = (_segmentOverride != -1) ? _segmentOverride : base_segment;
-                }
-                else {
-                    // This is a no-segment access (IVT read or I/O).
-                    // We use register slot 9 because it's a register slot that stays as all-zero bits, and has the
-                    // same low two bits (so that the logs show the right segment).
-                    if (_ioSegment == 1) {
-                        _ioSegment = 9;
-                    }
-                }
-                _ioIndex = ind();
-                _ioAddress = physicalAddress(_ioSegment, _ioIndex);
-
-                _state = stateWaitingUntilFirstByteDone;
-                busStart();
-                break;
-            }
             case stateWaitingUntilFirstByteDone:
                 if (!_wordSize) {
                     // 8-bit access, disable BIU request flag as we will complete this bus cycle.
@@ -1584,7 +1536,7 @@ private:
                     // 8-bit access - all done this state.
                     // When reading from the bus, the high byte is set to 0xFF on byte access.
 
-                    //busAccessDone(0xFF);
+                    // busAccessDone(0xFF);
                     busAccessDone(0x00);
                 }
                 else {
@@ -1798,7 +1750,7 @@ private:
             --_queueBytes;
             // Don't need to adjust newQueue here as we did that when popping.
         }
-        //if (_cyclesUntilCanLowerQueueFilled == 0 || (_cyclesUntilCanLowerQueueFilled == 1 && _queueBytes < 3)) {
+        // if (_cyclesUntilCanLowerQueueFilled == 0 || (_cyclesUntilCanLowerQueueFilled == 1 && _queueBytes < 3)) {
         //_cyclesUntilCanLowerQueueFilled = 0;
         if ((_queueBytes < 3 || (_busState == tIdle && (_lastIOType != ioPrefetch || (!_t4 && !_t5))))) {
             if (_busState == tIdle && !(_t4 && _lastIOType == ioPrefetch) && _queueBytes < 4) {
@@ -1806,7 +1758,7 @@ private:
             }
         }
         //}
-        //else
+        // else
         //    --_cyclesUntilCanLowerQueueFilled;
 
         // We can execute microcode in loader states 2 & 3.
@@ -1958,17 +1910,13 @@ private:
             "RC", // CS
             "RS", // SS - presumably, to fit pattern. Only used in RESET
             "RD", // DS
-            "PC",
-            "IND",
-            "OPR",
+            "PC",      "IND",  "OPR",
             "no dest", // as dest only - source is Q
             "A", // AL
             "C", // CL? - not used
             "E", // DL? - not used
             "L", // BL? - not used
-            "tmpa",
-            "tmpb",
-            "tmpc",
+            "tmpa",    "tmpb", "tmpc",
             "F", // flags register
             "X", // AH
             "B", // CH? - not used
@@ -1995,13 +1943,10 @@ private:
             "NCZ ",
             "TEST", // jump if overflow flag is set
             "OF  ", // jump if -TEST pin not asserted
-            "CY  ",
-            "UNC ",
-            "NF1 ",
+            "CY  ", "UNC ", "NF1 ",
             "NZ  ", // jump if not zero (used in JCXZ and LOOP)
             "X0  ", // jump if bit 3 of opcode is 1
-            "NCY ",
-            "F1  ",
+            "NCY ", "F1  ",
             "INT ", // jump if interrupt is pending
             "XC  ", // jump if condition based on low 4 bits of opcode
         };
@@ -2030,9 +1975,7 @@ private:
             "POSTIDIV", // negate ~tmpc if F1 set
         };
 
-        int mcIndex =
-        ((_microcodeIndex[_lastMicrocodePointer >> 2] << 2) +
-            (_lastMicrocodePointer & 3)) << 2;
+        int mcIndex = ((_microcodeIndex[_lastMicrocodePointer >> 2] << 2) + (_lastMicrocodePointer & 3)) << 2;
         int mcLineNumber = mcIndex >> 2;
         uint8_t* m = &_microcode[mcIndex];
         int d = m[0];
@@ -2068,7 +2011,8 @@ private:
                 case 0x16:
                     source = "CR";
                     break;
-                // low 3 bits of microcode address Counting Register + 1? Used as interrupt number at 0x198 (1), 0x199 (2), 0x1a7 (0), 0x1af (4), and 0x1b2 (3)
+                // low 3 bits of microcode address Counting Register + 1? Used as interrupt number at 0x198 (1), 0x199
+                // (2), 0x1a7 (0), 0x1af (4), and 0x1b2 (3)
                 case 0x17:
                     source = "ZERO";
                     break;
@@ -2392,30 +2336,20 @@ private:
         return jump;
     }
 
-    bool interruptPending() {
-        return _nmiRequested || (intf() && _interruptPending);
-    }
+    bool interruptPending() { return _nmiRequested || (intf() && _interruptPending); }
 
     uint16_t wordMask() const { return _wordSize ? 0xffff : 0xff; }
 
     void doPZS(const uint16_t v) {
         static uint8_t table[0x100] = {
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4};
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4};
         _parity = table[v & 0xff];
         _zero = ((v & wordMask()) == 0);
         _superZero = (v == 0);
@@ -2521,11 +2455,7 @@ private:
     public:
         typedef std::size_t size_type;
 
-        InstructionQueue() :
-            head_(0)
-            , tail_(0)
-            , size_(0) {
-        }
+        InstructionQueue() : head_(0), tail_(0), size_(0) {}
 
         void clear() {
             head_ = 0;
@@ -2533,29 +2463,17 @@ private:
             size_ = 0;
         }
 
-        size_type size() const {
-            return size_;
-        }
+        size_type size() const { return size_; }
 
-        static size_type capacity() {
-            return QueueLen;
-        }
+        static size_type capacity() { return QueueLen; }
 
-        bool isEmpty() const {
-            return size_ == 0;
-        }
+        bool isEmpty() const { return size_ == 0; }
 
-        bool full() const {
-            return size_ == QueueLen;
-        }
+        bool full() const { return size_ == QueueLen; }
 
-        size_type freeSpace() const {
-            return QueueLen - size_;
-        }
+        size_type freeSpace() const { return QueueLen - size_; }
 
-        bool hasRoom() const {
-            return freeSpace() >= sizeof(WordT);
-        }
+        bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
 
         // Push a single entry (byte + address). Returns false if full.
         bool push(uint8_t data, uint16_t address) {
@@ -2629,11 +2547,7 @@ private:
                 const uint8_t b = buffer_[index].data;
 
                 // Two-digit upper-case hex
-                oss << std::uppercase
-                    << std::hex
-                    << std::setw(2)
-                    << std::setfill('0')
-                    << static_cast<unsigned>(b);
+                oss << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(b);
 
                 index = (index + 1) % QueueLen;
             }
@@ -2708,11 +2622,7 @@ private:
     public:
         typedef std::size_t size_type;
 
-        InstructionHistory() :
-            head_(0)
-            , tail_(0)
-            , size_(0) {
-        }
+        InstructionHistory() : head_(0), tail_(0), size_(0) {}
 
         void clear() {
             head_ = 0;
@@ -2720,29 +2630,17 @@ private:
             size_ = 0;
         }
 
-        size_type len() const {
-            return size_;
-        }
+        size_type len() const { return size_; }
 
-        size_type capacity() {
-            return capacity_;
-        }
+        size_type capacity() { return capacity_; }
 
-        bool isEmpty() const {
-            return size_ == 0;
-        }
+        bool isEmpty() const { return size_ == 0; }
 
-        bool full() const {
-            return head_ == tail_;
-        }
+        bool full() const { return head_ == tail_; }
 
-        size_type freeSpace() const {
-            return QueueLen - size_;
-        }
+        size_type freeSpace() const { return QueueLen - size_; }
 
-        bool hasRoom() const {
-            return freeSpace() >= sizeof(WordT);
-        }
+        bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
 
         // Push a single entry (byte + address). Returns false if full.
         bool push(InstructionHistoryEntry entry) {
@@ -2828,8 +2726,7 @@ private:
 
     // Advance the microcode pointer to the next instruction. Only the low 4 bits are incremented.
     void advanceMicrocodePointer() {
-        _microcodePointer =
-            (_microcodePointer & 0xFFF0) | ((_microcodePointer + 1) & 0xf);
+        _microcodePointer = (_microcodePointer & 0xFFF0) | ((_microcodePointer + 1) & 0xf);
     }
 
     int _stopIP;
@@ -2920,7 +2817,7 @@ private:
     bool _extraHaltDelay;
     uint32_t _savedAddress;
     bool _ready = true;
-    //int _cyclesUntilCanLowerQueueFilled;
+    // int _cyclesUntilCanLowerQueueFilled;
     bool _locking = false;
     // Breakpoint state
     bool _hasBreakpoint = false;
