@@ -93,6 +93,10 @@ struct AppContext
     uint64_t virtual_frame_count{0};
     double virtual_refresh_hz{0.0};
 
+    // Active emulation work and virtual time advanced during the title interval.
+    Uint64 utilization_counter_ticks{0};
+    uint64_t utilization_cycles{0};
+
     // Emulated time follows the wall clock, independently of presentation.
     double crystal_hz{14318180.0}; // 14.31818 MHz
     EmulationClock cpu_clock{crystal_hz / 3.0, counter_frequency};
@@ -143,6 +147,21 @@ struct AppContext
     std::string pending_disk_path;
     bool pending_disk_load_flag{false};
 
+    void resetUtilization() {
+        utilization_counter_ticks = 0;
+        utilization_cycles = 0;
+    }
+
+    int utilizationPercent() const {
+        if (utilization_cycles == 0) {
+            return 0;
+        }
+        const double execution_seconds = static_cast<double>(utilization_counter_ticks) / counter_frequency;
+        const double virtual_seconds = static_cast<double>(utilization_cycles) / (crystal_hz / 3.0);
+        // Truncate so 100% is reserved for work that reaches or exceeds its budget.
+        return static_cast<int>(std::clamp(100.0 * execution_seconds / virtual_seconds, 0.0, 100.0));
+    }
+
     void resetAudio() {
         SDL_ClearAudioStream(pc_speaker_stream);
         blip_buf.clear();
@@ -159,6 +178,7 @@ struct AppContext
         last_cycle_count = machine->cycleCount();
         cpu_clock.reset(SDL_GetPerformanceCounter(), last_cycle_count, machine->isRunning());
         effective_mhz = 0.0;
+        resetUtilization();
         display_texture_dirty = true;
         resetAudio();
     }
@@ -169,10 +189,12 @@ struct AppContext
         if (cycles_before < last_cycle_count) {
             // Includes resets made directly from the debugger window.
             cpu_clock.reset(now, cycles_before, is_running);
+            resetUtilization();
             display_texture_dirty = true;
             resetAudio();
         }
         if (is_running != emulation_running) {
+            resetUtilization();
             resetAudio();
         }
 
@@ -200,6 +222,8 @@ struct AppContext
         // About 1 ms per slice keeps audio generation granular even after a stall.
         const auto max_slice_cycles = static_cast<uint64_t>(crystal_hz / 3.0 / 1000.0);
 
+        // Time emulation and audio generation, independently of host presentation.
+        const Uint64 emulation_start = SDL_GetPerformanceCounter();
         while (remaining_cycles > 0) {
             const uint64_t slice_cycles = std::min(remaining_cycles, max_slice_cycles);
             // Machine takes crystal ticks: convert whole CPU cycles exactly once.
@@ -228,8 +252,18 @@ struct AppContext
                 break;
             }
         }
+        const Uint64 emulation_end = SDL_GetPerformanceCounter();
 
         const uint64_t cycles_after = machine->cycleCount();
+        if (!machine->isRunning()) {
+            // Includes breakpoints reached during this batch; stepping is not sampled.
+            resetUtilization();
+        }
+        else if (cycles_after > cycles_before) {
+            utilization_counter_ticks += emulation_end - emulation_start;
+            // Actual progress also handles partial batches and capped catch-up budgets.
+            utilization_cycles += cycles_after - cycles_before;
+        }
         // Pair executed cycles with the SAME interval that produced the budget.
         // No smoothing: missed budgets and genuine slowdowns remain visible.
         effective_mhz =
@@ -662,9 +696,12 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         app->virtual_frame_count = 0;
         app->fps_timer = 0.0;
 
+        const int utilization = app->utilizationPercent();
+        app->resetUtilization();
+
         char title[128];
-        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS | CPU %.2f MHz | CGA %.1f Hz", app->fps,
-                 app->effective_mhz, app->virtual_refresh_hz);
+        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS | CPU %.2f MHz | CGA %.1f Hz | %d%%", app->fps,
+                 app->effective_mhz, app->virtual_refresh_hz, utilization);
         SDL_SetWindowTitle(app->window, title);
     }
 
@@ -744,13 +781,11 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
                 if (ImGui::MenuItem("Dump memory")) {
                     if (app->machine) {
                         uint8_t* ram = app->machine->ram();
-                        const size_t size = app->machine->ramSize();
-                        if (!ram || size == 0) {
+                        if (const size_t size = app->machine->ramSize(); !ram || size == 0) {
                             SDL_Log("Dump memory: RAM pointer null or size is 0");
                         }
                         else {
-                            std::ofstream out("memdump.bin", std::ios::binary);
-                            if (!out) {
+                            if (std::ofstream out("memdump.bin", std::ios::binary); !out) {
                                 SDL_Log("Dump memory: Failed to open memdump.bin for writing: %s", SDL_GetError());
                             }
                             else {
@@ -828,10 +863,14 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             if (auto* cga = bus->cga()) {
                 app->updateDisplayTexture(cga);
                 const auto aperture = CGA::getDisplayAperture();
-                SDL_Rect src_rect_i{static_cast<int>(aperture.x), static_cast<int>(aperture.y),
-                                    static_cast<int>(aperture.w), static_cast<int>(aperture.h)};
-                SDL_FRect src_rect_f{static_cast<float>(src_rect_i.x), static_cast<float>(src_rect_i.y),
-                                     static_cast<float>(src_rect_i.w), static_cast<float>(src_rect_i.h)};
+                SDL_Rect src_rect_i{.x = static_cast<int>(aperture.x),
+                                    .y = static_cast<int>(aperture.y),
+                                    .w = static_cast<int>(aperture.w),
+                                    .h = static_cast<int>(aperture.h)};
+                SDL_FRect src_rect_f{.x = static_cast<float>(src_rect_i.x),
+                                     .y = static_cast<float>(src_rect_i.y),
+                                     .w = static_cast<float>(src_rect_i.w),
+                                     .h = static_cast<float>(src_rect_i.h)};
                 SDL_Rect dst;
                 int ww, wh;
                 SDL_GetWindowSize(app->window, &ww, &wh);
@@ -839,7 +878,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
                 dst.y = 0;
                 dst.w = ww;
                 dst.h = wh;
-                SDL_FRect dstF{0.0f, 0.0f, static_cast<float>(ww), static_cast<float>(wh)};
+                SDL_FRect dstF{.x = 0.0f, .y = 0.0f, .w = static_cast<float>(ww), .h = static_cast<float>(wh)};
                 if (!SDL_RenderTexture(app->renderer, app->display_texture, &src_rect_f, &dstF)) {
                     SDL_Log("SDL_RenderTexture failed: %s", SDL_GetError());
                     SDL_SetRenderDrawColor(app->renderer, 0xFF, 0x00, 0xFF, 0xFF);
@@ -864,8 +903,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             // Load the selected disk image into the emulator
             if (auto* bus = app->machine->getBus()) {
                 try {
-                    std::ifstream in(app->pending_disk_path, std::ios::binary);
-                    if (!in) {
+                    if (std::ifstream in(app->pending_disk_path, std::ios::binary); !in) {
                         SDL_Log("Failed to open selected floppy image: %s", app->pending_disk_path.c_str());
                     }
                     else {
