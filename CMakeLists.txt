@@ -83,6 +83,9 @@ target_sources(${EXECUTABLE_NAME}
 # Set C++ version
 target_compile_features(${EXECUTABLE_NAME} PUBLIC cxx_std_20)
 
+# Keep Blip's phase table layout consistent in the caller and library.
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE BLIP_PHASE_BITS=8)
+
 # on Web targets, we need CMake to generate a HTML webpage. 
 if(EMSCRIPTEN)
 	set(CMAKE_EXECUTABLE_SUFFIX ".html" CACHE INTERNAL "")

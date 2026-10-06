@@ -1,43 +1,42 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 Daniel Balsom
-#include <cmath>
-#include <string_view>
-#include <filesystem>
 #include <algorithm>
-#include <cstdio>
-#include <fstream>
-#include <filesystem>
-#include <mutex>
-#include <iterator>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <mutex>
+#include <string_view>
 
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
 #include <SDL3/SDL_init.h>
-#include <SDL3_ttf/SDL_ttf.h>
+#include <SDL3/SDL_main.h>
 #include <SDL3_mixer/SDL_mixer.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include "Blip_Buffer.h"
 
-#include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_sdl3.h>
 #include <imgui/backends/imgui_impl_sdlrenderer3.h>
+#include <imgui/imgui.h>
 
 #include "CLI11.hpp"
 #include "xtce_blue.h"
 
-#include "gui/imgui_memory_editor.h"
-#include "gui/DebuggerWindow.h"
-#include "gui/DebuggerManager.h"
-#include "gui/DisassemblyWindow.h"
-#include "gui/MemoryViewerWindow.h"
+#include "gui/CpuStatusWindow.h"
 #include "gui/CycleLogWindow.h"
+#include "gui/DebuggerManager.h"
+#include "gui/DebuggerWindow.h"
+#include "gui/DisassemblyWindow.h"
+#include "gui/DisplayDebugWindow.h"
+#include "gui/DmacStatusWindow.h"
+#include "gui/MemoryViewerWindow.h"
+#include "gui/PicStatusWindow.h"
 #include "gui/StackViewerWindow.h"
 #include "gui/VideoCardStatusWindow.h"
-#include "gui/PicStatusWindow.h"
-#include "gui/DmacStatusWindow.h"
-#include "gui/DisplayDebugWindow.h"
-#include "gui/CpuStatusWindow.h"
+#include "gui/imgui_memory_editor.h"
 
 #include "core/Machine.h"
 
@@ -82,7 +81,7 @@ struct AppContext
 
     // Blip buffer for audio
     Blip_Buffer blip_buf{};
-    Blip_Synth<blip_good_quality, 20> blip_synth;
+    Blip_Synth<blip_high_quality, 1> blip_synth;
     blip_sample_t samples[BLIP_SAMPLE_COUNT];
 
     // FPS tracking
@@ -147,7 +146,10 @@ struct AppContext
     void resetAudio() {
         SDL_ClearAudioStream(pc_speaker_stream);
         blip_buf.clear();
+        // Clearing the buffer does not clear the synth's remembered amplitude.
+        blip_synth.output(&blip_buf);
         machine->getElapsedPitTicks(true);
+        blip_synth.update(0, machine->getBus()->speakerLevel() ? 1 : 0);
         audio_rate_ratio = 1.0;
         SDL_SetAudioStreamFrequencyRatio(pc_speaker_stream, 1.0f);
     }
@@ -230,9 +232,8 @@ struct AppContext
         const uint64_t cycles_after = machine->cycleCount();
         // Pair executed cycles with the SAME interval that produced the budget.
         // No smoothing: missed budgets and genuine slowdowns remain visible.
-        effective_mhz = elapsed_seconds > 0.0
-            ? static_cast<double>(cycles_after - cycles_before) / elapsed_seconds / 1e6
-            : 0.0;
+        effective_mhz =
+            elapsed_seconds > 0.0 ? static_cast<double>(cycles_after - cycles_before) / elapsed_seconds / 1e6 : 0.0;
         last_cycle_count = cycles_after;
         emulation_running = machine->isRunning();
     }
@@ -299,11 +300,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     auto* run_test = cli_app.add_subcommand("run-tests", "Run SingleStepTests");
     run_test->add_option("--test-path", cfg.test_path, "Path to location of SingleStepTests")->required(false);
     run_test->add_option("--test-max", cfg.test_max, "Maximum number of tests to run (0 = no limit)");
-    run_test->add_option("--opcode-start", cfg.opcode_start,
-                         "Starting opcode prefix as two-digit hex (00..FF), matched against filename prefix e.g. '00.MOO.gz'")
-            ->capture_default_str();
-    run_test->add_option("--opcode-end", cfg.opcode_end, "Ending opcode prefix as two-digit hex (00..FF)")->
-              capture_default_str();
+    run_test
+        ->add_option(
+            "--opcode-start", cfg.opcode_start,
+            "Starting opcode prefix as two-digit hex (00..FF), matched against filename prefix e.g. '00.MOO.gz'")
+        ->capture_default_str();
+    run_test->add_option("--opcode-end", cfg.opcode_end, "Ending opcode prefix as two-digit hex (00..FF)")
+        ->capture_default_str();
 
     // Parse the arguments (this is an expansion of the CLI11_PARSE macro)
     try {
@@ -317,7 +320,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // If subcommand was invoked, run tests and exit
     if (*run_test) {
         // Parse and validate two-digit hex opcode range strings
-        auto parse_hex_byte = [&](const std::string& s, int& out)-> bool
+        auto parse_hex_byte = [&](const std::string& s, int& out) -> bool
         {
             if (s.size() != 2)
                 return false;
@@ -326,7 +329,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             try {
                 out = std::stoi(s, nullptr, 16);
             }
-            catch (...) { return false; }
+            catch (...) {
+                return false;
+            }
             return out >= 0 && out <= 0xFF;
         };
 
@@ -356,14 +361,16 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
                     if (name.size() < 3)
                         continue;
                     // Expect filename starting with two hex digits followed by a dot, e.g. "00.MOO.gz"
-                    if (!std::isxdigit(static_cast<unsigned char>(name[0])) || !std::isxdigit(
-                        static_cast<unsigned char>(name[1])) || name[2] != '.')
+                    if (!std::isxdigit(static_cast<unsigned char>(name[0])) ||
+                        !std::isxdigit(static_cast<unsigned char>(name[1])) || name[2] != '.')
                         continue;
                     int val = 0;
                     try {
                         val = std::stoi(name.substr(0, 2), nullptr, 16);
                     }
-                    catch (...) { continue; }
+                    catch (...) {
+                        continue;
+                    }
                     if (val >= startVal && val <= endVal) {
                         test_runner->addFiles(entry.path().string());
                     }
@@ -371,8 +378,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             }
             else if (std::filesystem::is_regular_file(p)) {
                 const auto name = p.filename().string();
-                if (name.size() >= 3 && std::isxdigit(static_cast<unsigned char>(name[0])) && std::isxdigit(
-                    static_cast<unsigned char>(name[1])) && name[2] == '.') {
+                if (name.size() >= 3 && std::isxdigit(static_cast<unsigned char>(name[0])) &&
+                    std::isxdigit(static_cast<unsigned char>(name[1])) && name[2] == '.') {
                     try {
                         int val = std::stoi(name.substr(0, 2), nullptr, 16);
                         if (val >= startVal && val <= endVal)
@@ -401,12 +408,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     // Create our main window. We want it to be resizable and high-DPI aware.
-    SDL_Window* window =
-        SDL_CreateWindow(
-            "XTCE-Blue",
-            windowStartWidth,
-            windowStartHeight,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_Window* window = SDL_CreateWindow("XTCE-Blue", windowStartWidth, windowStartHeight,
+                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
     if (not window) {
         return SDL_Fail();
@@ -492,13 +495,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->blip_buf.bass_freq(200); // 200Hz high-pass filter to reduce bass rumble
     // PIT clock is (crystal / 12) or ~ 1.19318 MHz
     ctx->blip_buf.clock_rate(static_cast<long>(ctx->crystal_hz / 12.0));
-    ctx->blip_synth.volume(0.35);
+    ctx->blip_synth.volume(0.0175); // Preserve the gain previously divided by amplitude range 20.
     ctx->blip_synth.output(&ctx->blip_buf);
 
-    const blip_eq_t eq(
-        0.0, // 0dB = fairly flat highs
-        8000, // roll off above ~8kHz
-        AUDIO_SAMPLE_RATE);
+    const blip_eq_t eq(0.0, // 0dB = fairly flat highs
+                       8000, // roll off above ~8kHz
+                       AUDIO_SAMPLE_RATE);
 
     ctx->blip_synth.treble_eq(eq);
 
@@ -508,13 +510,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         {
             // Calculate elapsed ticks
             const auto elapsed_ticks = static_cast<blip_time_t>(ctx->machine->getElapsedPitTicks(false));
-            if (enabled) {
-                ctx->blip_synth.offset(elapsed_ticks, state ? 1 : -1);
-            }
-            else {
-                // If the speaker is disabled, drive 0 level.
-                ctx->blip_synth.offset(elapsed_ticks, 0);
-            }
+            ctx->blip_synth.update(elapsed_ticks, enabled && state ? 1 : 0);
         });
 
     // Show our new SDL window, and print some debugs about its size and DPI.
@@ -531,36 +527,28 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     // Create the display texture (full front buffer size); aperture will be applied as source rect when rendering.
-    ctx->display_texture =
-        SDL_CreateTexture(
-            renderer,
-            SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_STREAMING,
-            DisplayRenderer::WIDTH,
-            DisplayRenderer::HEIGHT);
+    ctx->display_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+                                             DisplayRenderer::WIDTH, DisplayRenderer::HEIGHT);
     if (!ctx->display_texture) {
         SDL_Log("Failed to create display texture: %s", SDL_GetError());
-        //return SDL_APP_FAILURE;
+        // return SDL_APP_FAILURE;
     }
 
     // Register our various debug windows with the AppContext's dbgManager
-    ctx->dbg_manager.addWindow("Disassembly", std::make_unique<DisassemblyWindow>(machine),
-                               &ctx->show_disassembly);
+    ctx->dbg_manager.addWindow("Disassembly", std::make_unique<DisassemblyWindow>(machine), &ctx->show_disassembly);
     ctx->dbg_manager.addWindow("Cpu Status", std::make_unique<CpuStatusWindow>(machine), &ctx->show_cpu_viewer);
     ctx->dbg_manager.addWindow("Memory Viewer", std::make_unique<MemoryViewerWindow>(machine),
                                &ctx->show_memory_viewer);
     ctx->dbg_manager.addWindow("VRAM Viewer", std::make_unique<MemoryViewerWindow>(machine, true),
                                &ctx->show_vram_viewer);
-    ctx->dbg_manager.addWindow("Stack Viewer", std::make_unique<StackViewerWindow>(machine),
-                               &ctx->show_stack_viewer);
+    ctx->dbg_manager.addWindow("Stack Viewer", std::make_unique<StackViewerWindow>(machine), &ctx->show_stack_viewer);
     ctx->dbg_manager.addWindow("Cycle Log", std::make_unique<CycleLogWindow>(machine), &ctx->show_cycle_log);
     ctx->dbg_manager.addWindow("Instruction History", std::make_unique<InstructionHistoryWindow>(machine),
                                &ctx->show_instruction_history);
     ctx->dbg_manager.addWindow("Video Card Status", std::make_unique<VideoCardStatusWindow>(machine),
                                &ctx->show_video_card_viewer);
     ctx->dbg_manager.addWindow("PIC Status", std::make_unique<PicStatusWindow>(machine), &ctx->show_pic_viewer);
-    ctx->dbg_manager.addWindow("DMA Status", std::make_unique<DmacStatusWindow>(machine),
-                               &ctx->show_dma_viewer);
+    ctx->dbg_manager.addWindow("DMA Status", std::make_unique<DmacStatusWindow>(machine), &ctx->show_dma_viewer);
     // Display debug window uses the app's displayTexture pointer
     ctx->dbg_manager.addWindow("Display Debug", std::make_unique<DisplayDebugWindow>(&ctx->display_texture),
                                &ctx->show_display_debug);
@@ -594,25 +582,25 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
     const ImGuiIO& io = ImGui::GetIO();
 
     switch (event->type) {
-        // case SDL_EVENT_MOUSE_MOTION:
-        //     SDL_Log("MOUSE MOTION: x=%f y=%f rel=(%f,%f)",
-        //             event->motion.x, event->motion.y,
-        //             event->motion.xrel, event->motion.yrel);
-        //     break;
-        //
-        // case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        //     SDL_Log("MOUSE BUTTON DOWN: button=%d at (%f,%f)",
-        //             event->button.button, event->button.x, event->button.y);
-        //     break;
-        //
-        // case SDL_EVENT_MOUSE_BUTTON_UP:
-        //     SDL_Log("MOUSE BUTTON UP: button=%d at (%f,%f)",
-        //             event->button.button, event->button.x, event->button.y);
-        //     break;
-        //
-        // case SDL_EVENT_MOUSE_WHEEL:
-        //     SDL_Log("MOUSE WHEEL: x=%f y=%f", event->wheel.x, event->wheel.y);
-        //     break;
+            // case SDL_EVENT_MOUSE_MOTION:
+            //     SDL_Log("MOUSE MOTION: x=%f y=%f rel=(%f,%f)",
+            //             event->motion.x, event->motion.y,
+            //             event->motion.xrel, event->motion.yrel);
+            //     break;
+            //
+            // case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            //     SDL_Log("MOUSE BUTTON DOWN: button=%d at (%f,%f)",
+            //             event->button.button, event->button.x, event->button.y);
+            //     break;
+            //
+            // case SDL_EVENT_MOUSE_BUTTON_UP:
+            //     SDL_Log("MOUSE BUTTON UP: button=%d at (%f,%f)",
+            //             event->button.button, event->button.x, event->button.y);
+            //     break;
+            //
+            // case SDL_EVENT_MOUSE_WHEEL:
+            //     SDL_Log("MOUSE WHEEL: x=%f y=%f", event->wheel.x, event->wheel.y);
+            //     break;
 
         case SDL_EVENT_KEY_DOWN:
             // Only send key events to the machine if ImGui is not capturing keyboard input.
@@ -675,8 +663,8 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         app->fps_timer = 0.0;
 
         char title[128];
-        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS | CPU %.2f MHz | CGA %.1f Hz",
-                 app->fps, app->effective_mhz, app->virtual_refresh_hz);
+        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS | CPU %.2f MHz | CGA %.1f Hz", app->fps,
+                 app->effective_mhz, app->virtual_refresh_hz);
         SDL_SetWindowTitle(app->window, title);
     }
 
@@ -797,10 +785,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             ImGui::BulletText("Daniel Balsom (gloriouscow) - SDL3 frontend, CGA implementation");
 
             ImGui::NewLine();
-            ImGui::TextWrapped(
-                "XTCE-Blue is a cycle-accurate IBM XT emulator written in C++ using SDL3 and ImGui. "
-                "XTCE-Blue's 8088 emulation is powered by the XTCE 8088 CPU core - "
-                "which emulates the 8088 at the microcode level.");
+            ImGui::TextWrapped("XTCE-Blue is a cycle-accurate IBM XT emulator written in C++ using SDL3 and ImGui. "
+                               "XTCE-Blue's 8088 emulation is powered by the XTCE 8088 CPU core - "
+                               "which emulates the 8088 at the microcode level.");
 
             ImGui::NewLine();
             if (ImGui::Button("OK", ImVec2(120, 0))) {
@@ -885,8 +872,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
                         std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)),
                                                   std::istreambuf_iterator<char>());
                         bus->fdc()->loadDisk(0, data, true);
-                        SDL_Log("Loaded floppy image '%s' into FDC drive 0 (%zu bytes)",
-                                app->pending_disk_path.c_str(),
+                        SDL_Log("Loaded floppy image '%s' into FDC drive 0 (%zu bytes)", app->pending_disk_path.c_str(),
                                 data.size());
                     }
                 }

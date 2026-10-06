@@ -104,6 +104,9 @@ public:
 
     void setSpeakerCallback(PcSpeakerCallback callback) { speaker_callback_ = std::move(callback); }
 
+    // Use the same cached level supplied to the speaker callback.
+    [[nodiscard]] bool speakerLevel() const { return counter2_output_ && speaker_mask_; }
+
     void startAccess(const uint32_t address, const int type) {
         address_ = address;
         type_ = type;
