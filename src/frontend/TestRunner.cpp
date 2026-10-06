@@ -375,7 +375,7 @@ void TestRunner::printSummary() const {
         std::cout << "\nFailure samples (first 3 failing tests per file; first difference per signal category):\n";
 
         for (const auto& fd : failure_details_) {
-            std::cout << std::format("File: {} Test [{:05}]: {}\n  Hash: {}\n  {}\n  Instruction cycles: {}\n", f,
+            std::cout << std::format("File: {} Test [{:05}]: {}\n  Hash: {}\n  {}\n  Instruction cycles: {}\n", fd.file,
                                      fd.test_index, fd.test_name, fd.test_hash, fd.message, fd.cycles_taken);
 
             printRegisters(fd.regs, 2);
