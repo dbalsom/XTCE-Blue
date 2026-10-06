@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <mutex>
 #include <string_view>
 
@@ -23,6 +24,7 @@
 #include <imgui/imgui.h>
 
 #include "CLI11.hpp"
+#include "benchmark.h"
 #include "xtce_blue.h"
 
 #include "gui/CpuStatusWindow.h"
@@ -57,6 +59,7 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
 
 struct Config
 {
+    bool benchmark{false};
     std::string test_path{};
     size_t test_max{0};
     // Expect two-digit hex strings like "00".."FF"
@@ -329,9 +332,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // Run CLI11 to parse command-line arguments
     CLI::App cli_app{std::format("{} v{}", APP_NAME, APP_VERSION)};
     argv = cli_app.ensure_utf8(argv);
+    auto* benchmark_option =
+        cli_app.add_flag("--benchmark", cfg.benchmark,
+                         "Run headless and unthrottled until BIOS bootstrap (INT 19h), then print performance stats");
 
     // Create a subcommand 'run-tests' with options for test path and an optional max
     auto* run_test = cli_app.add_subcommand("run-tests", "Run SingleStepTests");
+    run_test->excludes(benchmark_option);
     run_test->add_option("--test-path", cfg.test_path, "Path to location of SingleStepTests")->required(false);
     run_test->add_option("--test-max", cfg.test_max, "Maximum number of tests to run (0 = no limit)");
     run_test
@@ -349,6 +356,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     catch (const CLI::ParseError& e) {
         cli_app.exit(e);
         return SDL_APP_FAILURE;
+    }
+
+    if (cfg.benchmark) {
+        return runBenchmark();
     }
 
     // If subcommand was invoked, run tests and exit
@@ -384,7 +395,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             return SDL_APP_FAILURE;
         }
 
-        auto test_runner = new TestRunner();
+        const auto test_runner = new TestRunner();
         if (!cfg.test_path.empty()) {
             const std::filesystem::path p(cfg.test_path);
             if (std::filesystem::is_directory(p)) {
@@ -415,7 +426,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
                 if (name.size() >= 3 && std::isxdigit(static_cast<unsigned char>(name[0])) &&
                     std::isxdigit(static_cast<unsigned char>(name[1])) && name[2] == '.') {
                     try {
-                        int val = std::stoi(name.substr(0, 2), nullptr, 16);
+                        const int val = std::stoi(name.substr(0, 2), nullptr, 16);
                         if (val >= startVal && val <= endVal)
                             test_runner->addFiles(p.string());
                     }
@@ -540,7 +551,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     // Attach our callback
     ctx->machine->getBus()->setSpeakerCallback(
-        [ctx](uint64_t tick, bool state, bool enabled)
+        [ctx](uint64_t tick, const bool state, const bool enabled)
         {
             // Calculate elapsed ticks
             const auto elapsed_ticks = static_cast<blip_time_t>(ctx->machine->getElapsedPitTicks(false));
@@ -606,7 +617,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 }
 
 // SDL's event callback. Handle UI events and pass relevant input to the Machine.
-SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
+// SDL_AppEvent_func requires a non-const event pointer, even though we only read it.
+// ReSharper disable once CppParameterMayBeConstPtrOrRef
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) { // NOLINT(readability-non-const-parameter)
     auto* app = static_cast<AppContext*>(appstate);
     uint8_t sc{};
 
@@ -682,8 +695,8 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     // Advance emulation and see if frames were emitted
     const auto virtual_frames_before = app->machine->getBus()->cga()->getDebugState().frame_count;
     app->advanceEmulation(now, delta);
-    const auto virtual_frames_after = app->machine->getBus()->cga()->getDebugState().frame_count;
-    if (virtual_frames_after >= virtual_frames_before) {
+    if (const auto virtual_frames_after = app->machine->getBus()->cga()->getDebugState().frame_count;
+        virtual_frames_after >= virtual_frames_before) {
         app->virtual_frame_count += virtual_frames_after - virtual_frames_before;
     }
 
@@ -926,6 +939,10 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
 // Called when our SDL app needs to exit. We should clean up all our resources here.
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    // Command-line modes return from initialization without creating an SDL app.
+    if (!appstate) {
+        return;
+    }
     if (const auto* app = static_cast<AppContext*>(appstate)) {
         if (app->display_texture) {
             SDL_DestroyTexture(app->display_texture);

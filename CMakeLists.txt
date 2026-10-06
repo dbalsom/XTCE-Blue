@@ -40,6 +40,8 @@ target_include_directories(${EXECUTABLE_NAME}
 target_sources(${EXECUTABLE_NAME} 
     PRIVATE
         src/main.cpp
+        src/benchmark.cpp
+        src/benchmark.h
         src/core/Machine.cpp
         src/core/Machine.h
         src/xtce_blue.h
