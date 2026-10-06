@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Dmac.h"
+#include "Pic.h"
 
 // -------------------------------- I/O ports ---------------------------------
 static constexpr uint16_t PORT_DOR = 2; // Digital Output Register (write)
