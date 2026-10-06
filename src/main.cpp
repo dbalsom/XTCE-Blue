@@ -467,7 +467,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_Fail();
     }
 
-    // Presentation is uncapped; the CPU has its own wall-clock deadlines.
+    // Limit UI/presentation to 240 Hz; the CPU still follows elapsed wall time.
+    SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, "240");
     if (!SDL_SetRenderVSync(renderer, 0)) {
         SDL_Log("Could not disable presentation vsync: %s", SDL_GetError());
     }
@@ -514,7 +515,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->blip_buf.bass_freq(200); // 200Hz high-pass filter to reduce bass rumble
     // PIT clock is (crystal / 12) or ~ 1.19318 MHz
     ctx->blip_buf.clock_rate(static_cast<long>(ctx->crystal_hz / 12.0));
-    ctx->blip_synth.volume(0.0175); // Preserve the gain previously divided by amplitude range 20.
+    ctx->blip_synth.volume(0.02625);
     ctx->blip_synth.output(&ctx->blip_buf);
 
     const blip_eq_t eq(0.0, // 0dB = fairly flat highs
@@ -801,7 +802,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
                          ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
             ImGui::Text("XTCE-Blue");
             ImGui::Separator();
-            ImGui::Text("Version: 0.1.0");
+            ImGui::Text("Version: %s", APP_VERSION);
             ImGui::Text("Authors:");
             ImGui::BulletText("Andrew Jenner (reenigne) - original XTCE CPU core");
             ImGui::BulletText("Daniel Balsom (gloriouscow) - SDL3 frontend, CGA implementation");

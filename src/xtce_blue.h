@@ -5,7 +5,7 @@
 #include <functional>
 
 constexpr auto APP_NAME = "XTCE-Blue";
-constexpr auto APP_VERSION = "0.1.0";
+constexpr auto APP_VERSION = "0.2.0";
 
 #define AUDIO_SAMPLE_RATE 44100
 #define AUDIO_SAMPLE_BUFFER "512" // String for SDL_SetHint
