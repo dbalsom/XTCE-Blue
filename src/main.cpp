@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Daniel Balsom
 #include <cmath>
 #include <string_view>
 #include <filesystem>
@@ -40,6 +42,7 @@
 #include "core/Machine.h"
 
 #include "frontend/DisplayRenderer.h"
+#include "frontend/EmulationClock.h"
 #include "frontend/TestRunner.h"
 #include "frontend/keyboard.h"
 #include "gui/InstructionHistoryWindow.h"
@@ -83,20 +86,28 @@ struct AppContext
     blip_sample_t samples[BLIP_SAMPLE_COUNT];
 
     // FPS tracking
+    Uint64 counter_frequency{SDL_GetPerformanceFrequency()};
     Uint64 last_counter{0};
-    float fps_timer{0.0f};
+    double fps_timer{0.0};
     int frame_count{0};
     float fps{0.0f};
+    uint64_t virtual_frame_count{0};
+    double virtual_refresh_hz{0.0};
 
-    // Fixed-timestep CPU timing (14.31818 MHz crystal)
+    // Emulated time follows the wall clock, independently of presentation.
     double crystal_hz{14318180.0}; // 14.31818 MHz
-    double tick_accumulator{0.0}; // accumulated CPU ticks (fractional)
-    int ticks_per_frame{0}; // precomputed ticks per 1/60s frame
-    int max_frame_burst{5}; // max number of frames worth of ticks to run in a single iterate to avoid spiral of death
+    EmulationClock cpu_clock{crystal_hz / 3.0, counter_frequency};
+    bool emulation_running{false};
+    double audio_rate_ratio{1.0};
 
     // Display renderer and texture
     DisplayRenderer display_renderer;
     SDL_Texture* display_texture{nullptr};
+    bool display_texture_dirty{true};
+    uint64_t uploaded_cga_frame{0};
+    uint64_t last_cga_ticks{0};
+    uint8_t uploaded_cga_mode{0};
+    uint8_t uploaded_cga_border{0};
 
     bool show_about{false};
     bool show_demo{false};
@@ -119,7 +130,7 @@ struct AppContext
 
     // CPU timing display
     uint64_t last_cycle_count{0};
-    double smoothed_mhz{0.0};
+    double effective_mhz{0.0};
 
     // Cycle log UI
     bool show_cycle_log{false};
@@ -133,9 +144,139 @@ struct AppContext
     std::string pending_disk_path;
     bool pending_disk_load_flag{false};
 
+    void resetAudio() {
+        SDL_ClearAudioStream(pc_speaker_stream);
+        blip_buf.clear();
+        machine->getElapsedPitTicks(true);
+        audio_rate_ratio = 1.0;
+        SDL_SetAudioStreamFrequencyRatio(pc_speaker_stream, 1.0f);
+    }
+
     void resetMachine() {
-        last_cycle_count = 0;
         machine->resetMachine();
+        last_cycle_count = machine->cycleCount();
+        cpu_clock.reset(SDL_GetPerformanceCounter(), last_cycle_count, machine->isRunning());
+        effective_mhz = 0.0;
+        display_texture_dirty = true;
+        resetAudio();
+    }
+
+    void advanceEmulation(const Uint64 now, const double elapsed_seconds) {
+        const uint64_t cycles_before = machine->cycleCount();
+        const bool is_running = machine->isRunning();
+        if (cycles_before < last_cycle_count) {
+            // Includes resets made directly from the debugger window.
+            cpu_clock.reset(now, cycles_before, is_running);
+            display_texture_dirty = true;
+            resetAudio();
+        }
+        if (is_running != emulation_running) {
+            resetAudio();
+        }
+
+        // Small resampling corrections absorb drift in the audio device clock.
+        // Audio buffering should never change how many CPU cycles are due.
+        constexpr int bytes_per_second = AUDIO_SAMPLE_RATE * sizeof(int16_t);
+        constexpr int max_queued_bytes = bytes_per_second * AUDIO_MAX_LATENCY_MS / 1000;
+        int queued_bytes = SDL_GetAudioStreamQueued(pc_speaker_stream);
+
+        if (queued_bytes > max_queued_bytes) {
+            SDL_ClearAudioStream(pc_speaker_stream);
+            queued_bytes = 0;
+        }
+
+        if (is_running && queued_bytes >= 0) {
+            constexpr double target_seconds = AUDIO_MAX_LATENCY_MS / 2000.0;
+            const double queued_seconds = static_cast<double>(queued_bytes) / bytes_per_second;
+            const double desired_ratio = std::clamp(1.0 + 0.1 * (queued_seconds - target_seconds), 0.995, 1.005);
+            audio_rate_ratio += (desired_ratio - audio_rate_ratio) * std::min(elapsed_seconds * 4.0, 1.0);
+
+            SDL_SetAudioStreamFrequencyRatio(pc_speaker_stream, static_cast<float>(audio_rate_ratio));
+        }
+
+        uint64_t remaining_cycles = cpu_clock.cyclesDue(now, cycles_before, is_running);
+        // About 1 ms per slice keeps audio generation granular even after a stall.
+        const auto max_slice_cycles = static_cast<uint64_t>(crystal_hz / 3.0 / 1000.0);
+
+        while (remaining_cycles > 0) {
+            const uint64_t slice_cycles = std::min(remaining_cycles, max_slice_cycles);
+            // Machine takes crystal ticks: convert whole CPU cycles exactly once.
+            machine->run_for(slice_cycles * 3);
+            remaining_cycles -= slice_cycles;
+
+            const auto pit_ticks = machine->getElapsedPitTicks(true);
+            blip_buf.end_frame(static_cast<blip_time_t>(pit_ticks));
+            int16_t audio_samples[2048];
+            for (;;) {
+                const int count = blip_buf.read_samples(audio_samples, 2048);
+                if (count <= 0) {
+                    break;
+                }
+                const int bytes = count * sizeof(int16_t);
+                if (SDL_GetAudioStreamQueued(pc_speaker_stream) + bytes > max_queued_bytes) {
+                    // Drop stale audio after a stall or a non-consuming device;
+                    // retain recent sound without holding up CPU or UI progress.
+                    SDL_ClearAudioStream(pc_speaker_stream);
+                }
+                SDL_PutAudioStreamData(pc_speaker_stream, audio_samples, bytes);
+            }
+            if (!machine->isRunning()) {
+                cpu_clock.reset(now, machine->cycleCount(), false);
+                resetAudio();
+                break;
+            }
+        }
+
+        const uint64_t cycles_after = machine->cycleCount();
+        // Pair executed cycles with the SAME interval that produced the budget.
+        // No smoothing: missed budgets and genuine slowdowns remain visible.
+        effective_mhz = elapsed_seconds > 0.0
+            ? static_cast<double>(cycles_after - cycles_before) / elapsed_seconds / 1e6
+            : 0.0;
+        last_cycle_count = cycles_after;
+        emulation_running = machine->isRunning();
+    }
+
+    void updateDisplayTexture(CGA* cga) {
+        const auto state = cga->getDebugState();
+        const uint8_t border = cga->getOverscanColor();
+        const bool reset = state.ticks < last_cga_ticks;
+        last_cga_ticks = state.ticks;
+        if (!display_texture_dirty && !reset && state.frame_count == uploaded_cga_frame &&
+            (!display_composite || (state.mode_byte == uploaded_cga_mode && border == uploaded_cga_border))) {
+            return;
+        }
+
+        display_renderer.render(cga);
+
+        constexpr int row_bytes = DisplayRenderer::WIDTH * DisplayRenderer::BYTES_PER_PIXEL;
+        void* tex_pixels = nullptr;
+        int tex_pitch = 0;
+        bool uploaded = false;
+
+        if (SDL_LockTexture(display_texture, nullptr, &tex_pixels, &tex_pitch)) {
+            const uint8_t* src = display_renderer.pixels();
+            for (int y = 0; y < DisplayRenderer::HEIGHT; ++y) {
+                auto* dst_row = static_cast<uint8_t*>(tex_pixels) + static_cast<size_t>(y) * tex_pitch;
+                memcpy(dst_row, src + static_cast<size_t>(y) * row_bytes, row_bytes);
+            }
+            SDL_UnlockTexture(display_texture);
+            uploaded = true;
+        }
+        else {
+            uploaded = SDL_UpdateTexture(display_texture, nullptr, display_renderer.pixels(), row_bytes);
+        }
+
+        if (uploaded) {
+            uploaded_cga_frame = state.frame_count;
+            uploaded_cga_mode = state.mode_byte;
+            uploaded_cga_border = border;
+            display_texture_dirty = false;
+        }
+        else {
+            display_texture_dirty = true;
+            SDL_Log("CGA texture upload failed: %s", SDL_GetError());
+        }
     }
 };
 
@@ -277,8 +418,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_Fail();
     }
 
-    // Enable Vsync. Running at 1000fps is impressive, but it can cause headaches for time stepping.
-    SDL_SetRenderVSync(renderer, 1);
+    // Presentation is uncapped; the CPU has its own wall-clock deadlines.
+    if (!SDL_SetRenderVSync(renderer, 0)) {
+        SDL_Log("Could not disable presentation vsync: %s", SDL_GetError());
+    }
 
     // Initialize ImGui
     IMGUI_CHECKVERSION();
@@ -343,7 +486,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->mixer = mixer;
     ctx->pc_speaker_stream = stream;
     ctx->machine = machine;
-    ctx->last_counter = SDL_GetPerformanceCounter();
 
     // Initialize Blip_Buffer
     ctx->blip_buf.sample_rate(AUDIO_SAMPLE_RATE);
@@ -423,15 +565,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->dbg_manager.addWindow("Display Debug", std::make_unique<DisplayDebugWindow>(&ctx->display_texture),
                                &ctx->show_display_debug);
 
-    // Initialize cycle count baseline for MHz measurement
-    ctx->last_cycle_count = ctx->machine->cycleCount();
-
-    // Calculate a ticks_per_frame based on the main system crystal frequency (14.3181818Mhz) and 60 FPS (CGA refresh rate).
-    // If you ever wanted to support other systems or video cards (MDA: 50Hz, VGA: 60/70Hz), you'd need to make
-    // these values configurable.
-    constexpr double fps = 60.0;
-    ctx->ticks_per_frame = static_cast<int>(std::llround(ctx->crystal_hz / fps));
-
     // Initialize cycle log UI capacity from machine state
     ctx->cycle_log_capacity_ui = static_cast<int>(ctx->machine->getCycleLogCapacity());
 
@@ -442,6 +575,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     // Start the emulator!
     ctx->machine->run();
+    ctx->emulation_running = true;
+    ctx->last_counter = SDL_GetPerformanceCounter();
+    ctx->last_cycle_count = ctx->machine->cycleCount();
+    ctx->cpu_clock.reset(ctx->last_counter, ctx->last_cycle_count, true);
 
     return SDL_APP_CONTINUE;
 }
@@ -514,110 +651,34 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
     // Get the time delta since last update.
     const Uint64 now = SDL_GetPerformanceCounter();
-    const double delta = static_cast<double>(now - app->last_counter) / static_cast<double>(
-        SDL_GetPerformanceFrequency());
+    const double delta = static_cast<double>(now - app->last_counter) / static_cast<double>(app->counter_frequency);
     app->last_counter = now;
 
-    // Accumulate time and frames for smoother FPS
-    app->fps_timer += static_cast<float>(delta);
-    app->frame_count++;
+    // Include elapsed time even when this iteration skips rendering.
+    app->fps_timer += delta;
 
-    // Update CPU cycle / MHz measurement
-    uint64_t cycles = app->machine->cycleCount();
-    uint64_t deltaCycles = cycles >= app->last_cycle_count ? cycles - app->last_cycle_count : 0;
-    if (delta > 0.0) {
-        double mhz = (static_cast<double>(deltaCycles) / delta) / 1e6; // MHz
-        // Exponential smoothing: 90% previous, 10% new (adjust as needed)
-        constexpr double alpha = 0.10;
-        app->smoothed_mhz = (1.0 - alpha) * app->smoothed_mhz + alpha * mhz;
+    // Advance emulation and see if frames were emitted
+    const auto virtual_frames_before = app->machine->getBus()->cga()->getDebugState().frame_count;
+    app->advanceEmulation(now, delta);
+    const auto virtual_frames_after = app->machine->getBus()->cga()->getDebugState().frame_count;
+    if (virtual_frames_after >= virtual_frames_before) {
+        app->virtual_frame_count += virtual_frames_after - virtual_frames_before;
     }
-    app->last_cycle_count = cycles;
 
-    if (app->fps_timer >= 0.5f) {
-        // Update FPS twice per second
-        app->fps = static_cast<float>(app->frame_count) / app->fps_timer;
+    // Set window title with perf stats
+    if (app->fps_timer >= 0.5) {
+        // Measure host presentations and completed CGA frames over the same wall-clock interval.
+        app->fps = static_cast<float>(app->frame_count / app->fps_timer);
+        app->virtual_refresh_hz = static_cast<double>(app->virtual_frame_count) / app->fps_timer;
         app->frame_count = 0;
-        app->fps_timer = 0.0f;
+        app->virtual_frame_count = 0;
+        app->fps_timer = 0.0;
 
         char title[128];
-        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS", app->fps);
+        snprintf(title, sizeof(title), "XTCE-Blue — %.1f FPS | CPU %.2f MHz | CGA %.1f Hz",
+                 app->fps, app->effective_mhz, app->virtual_refresh_hz);
         SDL_SetWindowTitle(app->window, title);
     }
-
-    // Convert elapsed wall-clock time to CPU ticks (crystal cycles) and run the machine.
-    // Use an accumulator of fractional ticks to preserve long-term accuracy.
-    // Cap the amount of work per frame to avoid spiral-of-death if the app stalls.
-    double ticks_this_frame = delta * app->crystal_hz;
-    app->tick_accumulator += ticks_this_frame;
-
-    // Compute integer ticks to execute this iteration
-    if (long ticks_to_run = static_cast<long>(std::floor(app->tick_accumulator)); ticks_to_run > 0) {
-        // Cap ticks_to_run to a reasonable burst (e.g., max_frame_burst * ticks_per_frame)
-        const long max_ticks =
-            static_cast<long>(app->max_frame_burst) * static_cast<long>(std::max(1, app->ticks_per_frame));
-        if (ticks_to_run > max_ticks) {
-            ticks_to_run = max_ticks;
-        }
-
-        // Calculate audio latency
-        constexpr int max_queued_samples = AUDIO_SAMPLE_RATE * AUDIO_MAX_LATENCY_MS / 1000;
-        constexpr int max_queued_bytes = max_queued_samples * sizeof(int16_t);
-        int queued_bytes = SDL_GetAudioStreamAvailable(app->pc_speaker_stream);
-        if (queued_bytes > max_queued_bytes) {
-            // Too much audio queued, skip this frame's execution to let audio drain.
-            // This is not the best way to do this - better to dynamically adjust the audio stream's sample rate.
-            return SDL_APP_CONTINUE;
-        }
-
-        // Run the emulator.
-        if (app->machine->isRunning()) {
-
-            // We break up the total per-frame ticks_to_run into smaller slices to allow more frequent audio and input
-            // updates. For example, it is quite possible for a fast typist to generate multiple scancodes within a single
-            // 16.67ms frame (remember scancodes are sent on both key down and key up).
-            for (int si = 0; si < EMU_FRAME_SLICES; si++) {
-                auto slice_ticks = ticks_to_run / EMU_FRAME_SLICES;
-                if (si == EMU_FRAME_SLICES - 1) {
-                    // Last slice takes any remainder
-                    slice_ticks += ticks_to_run % EMU_FRAME_SLICES;
-                }
-
-                // Run emulator time slice.
-                app->machine->run_for(static_cast<uint64_t>(slice_ticks));
-                app->tick_accumulator -= static_cast<double>(slice_ticks);
-
-                // The PIT clock drives audio sync. Get the number of PIT ticks elapsed this slice.
-                // Passing true resets the tick counter for the next slice.
-                auto pit_ticks_elapsed = app->machine->getElapsedPitTicks(true);
-                //SDL_Log("PIT ticks elapsed this frame: %llu", static_cast<unsigned long long>(pit_ticks_elapsed));
-
-                // Tell Blip_Buffer we have completed an audio frame (emulator time slice).
-                app->blip_buf.end_frame(static_cast<blip_time_t>(pit_ticks_elapsed));
-
-                static int16_t temp[2048];
-                for (;;) {
-                    int n = app->blip_buf.read_samples(temp, 2048);
-                    if (n <= 0) {
-                        break;
-                    }
-                    SDL_PutAudioStreamData(app->pc_speaker_stream, temp, n * sizeof(int16_t));
-                }
-
-                // Stop executing slices if the machine has stopped (breakpoint, etc)
-                if (!app->machine->isRunning()) {
-                    break;
-                }
-            }
-        }
-        else {
-            // If CPU is paused, prevent tick_accumulator from growing without bound by capping it
-            double max_accum = static_cast<long>(app->max_frame_burst) * std::max(1, app->ticks_per_frame);
-            if (app->tick_accumulator > max_accum) {
-                app->tick_accumulator = max_accum;
-            }
-        }
-    }
-
 
     // If nothing to run, we still yield to UI and rendering below
     if (!app->running) {
@@ -660,6 +721,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             if (ImGui::MenuItem("Composite", nullptr, &composite)) {
                 app->display_composite = composite;
                 app->display_renderer.setComposite(composite);
+                app->display_texture_dirty = true;
             }
             ImGui::EndMenu();
         }
@@ -777,32 +839,12 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     if (app->display_texture && app->machine) {
         if (auto* bus = app->machine->getBus()) {
             if (auto* cga = bus->cga()) {
-                app->display_renderer.render(cga);
-                const auto aperture = cga->getDisplayAperture();
+                app->updateDisplayTexture(cga);
+                const auto aperture = CGA::getDisplayAperture();
                 SDL_Rect src_rect_i{static_cast<int>(aperture.x), static_cast<int>(aperture.y),
                                     static_cast<int>(aperture.w), static_cast<int>(aperture.h)};
                 SDL_FRect src_rect_f{static_cast<float>(src_rect_i.x), static_cast<float>(src_rect_i.y),
                                      static_cast<float>(src_rect_i.w), static_cast<float>(src_rect_i.h)};
-                void* tex_pixels = nullptr;
-                int tex_pitch = 0;
-                const int full_w = DisplayRenderer::WIDTH;
-                const int full_h = DisplayRenderer::HEIGHT;
-                const int row_bytes = full_w * DisplayRenderer::BYTES_PER_PIXEL;
-                if (SDL_LockTexture(app->display_texture, nullptr, &tex_pixels, &tex_pitch) && tex_pixels) {
-                    const uint8_t* src = app->display_renderer.pixels();
-                    for (int y = 0; y < full_h; ++y) {
-                        auto* dstRow = static_cast<uint8_t*>(tex_pixels) + static_cast<size_t>(y) * tex_pitch;
-                        const uint8_t* srcRow = src + static_cast<size_t>(y) * row_bytes;
-                        memcpy(dstRow, srcRow, row_bytes);
-                    }
-                    SDL_UnlockTexture(app->display_texture);
-                }
-                else {
-                    const int pitch = full_w * DisplayRenderer::BYTES_PER_PIXEL;
-                    if (!SDL_UpdateTexture(app->display_texture, nullptr, app->display_renderer.pixels(), pitch)) {
-                        SDL_Log("SDL_UpdateTexture failed: %s", SDL_GetError());
-                    }
-                }
                 SDL_Rect dst;
                 int ww, wh;
                 SDL_GetWindowSize(app->window, &ww, &wh);
@@ -820,8 +862,11 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             }
         }
     }
+
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), app->renderer);
-    SDL_RenderPresent(app->renderer);
+    if (SDL_RenderPresent(app->renderer)) {
+        app->frame_count++;
+    }
 
     // Process pending file dialog result (if any)
     {
