@@ -142,6 +142,7 @@ public:
 
     void setInitialIP(const int v) { pc() = v; }
     [[nodiscard]] uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
+    [[nodiscard]] uint64_t instructionCount() const { return instruction_count_; }
 
     [[nodiscard]] std::string log() const {
         // Assemble buffered lines into a single string on request
@@ -210,6 +211,7 @@ public:
 
         // Instruction tracking
         _inst_address = 0;
+        instruction_count_ = 0;
         _history.clear();
 
         _bad_opcode_ct = 0;
@@ -309,6 +311,14 @@ public:
     uint16_t breakpointCS() const { return _breakpoint_cs; }
     uint16_t breakpointIP() const { return _breakpoint_ip; }
     void clearBreakpointHit() { _breakpointHit = false; }
+
+    // Stop when INT imm8 consumes its vector, before entering the handler.
+    void setSoftwareInterruptBreakpoint(const uint8_t vector) {
+        software_interrupt_breakpoint_ = vector;
+        _breakpointHit = false;
+    }
+
+    void clearSoftwareInterruptBreakpoint() { software_interrupt_breakpoint_ = -1; }
 
 private:
     enum IOType
@@ -780,6 +790,11 @@ private:
         }
         _opcode = new_opcode;
         _group = _nextGroup;
+        // Count instruction starts, excluding prefixes and interrupt-entry microcode.
+        // REP iterations execute within one instruction and do not increment this.
+        if (new_opcode < 0x100 && (_group & groupNonPrefix) != 0) {
+            ++instruction_count_;
+        }
     }
 
     void readFlags() {
@@ -1098,12 +1113,17 @@ private:
     uint32_t readSource() {
         uint32_t v;
         switch (_source) {
-            case 7: // Q
+            case 7: { // Q
                 if (_queueBytes == 0) {
                     _state = stateWaitingForQueueData;
                     return 0;
                 }
-                return queueRead(QueueReadState::SubsequentByte);
+                const uint8_t data = queueRead(QueueReadState::SubsequentByte);
+                if (_opcode == 0xcd && data == software_interrupt_breakpoint_) {
+                    _breakpointHit = true;
+                }
+                return data;
+            }
             case 8: // A (AL)
             case 9: // C (CL)? - not used
             case 10: // E (DL)? - not used
@@ -2788,6 +2808,7 @@ private:
     int _loaderState;
     bool _rni{false}; // Microcode signal to read next instruction
     uint16_t _inst_address{0x0000};
+    uint64_t instruction_count_{0};
     bool _inst_boundary{false};
     bool _in_instruction{false};
     bool _nx{false}; // Microcode signal to read next instruction early (1-cycle pipeline)
@@ -2824,6 +2845,7 @@ private:
     bool _breakpointHit = false;
     uint16_t _breakpoint_cs = 0;
     uint16_t _breakpoint_ip = 0;
+    int software_interrupt_breakpoint_ = -1;
     uint32_t _testNumber = 0;
 
     bool _log_instructions = false;
