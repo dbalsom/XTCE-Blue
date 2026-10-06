@@ -433,18 +433,18 @@ public:
 
     bool interruptPending() { return pic_.interruptPending(); }
 
-    int pitBits() {
+    [[nodiscard]] int pitBits() const {
         return (pit_phase_ == 1 || pit_phase_ == 2 ? 1 : 0) + (counter2_gate_ ? 2 : 0) + (pit_.getOutput(2) ? 4 : 0);
     }
 
-    void setPassiveOrHalt(bool v) { passive_or_halt_ = v; }
+    void setPassiveOrHalt(const bool v) { passive_or_halt_ = v; }
 
     [[nodiscard]] bool getAEN() const {
         return dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
             dma_state_ == sWait || dma_state_ == s4;
     }
 
-    uint8_t getDMA() { return dmac_.getRequestLines() | (dack0() ? 0x10 : 0); }
+    [[nodiscard]] uint8_t getDMA() const { return dmac_.getRequestLines() | (dack0() ? 0x10 : 0); }
 
     std::string snifferExtra() {
         return ""; // hex(_pit.getMode(1), 4, false) + " ";
@@ -461,15 +461,17 @@ public:
         }
     }
 
-    bool getDMAS3() { return dma_state_ == s3; }
-    bool getDMADelayedT2() { return dma_state_ == sDelayedT2; }
+    [[nodiscard]] bool getDMAS3() const { return dma_state_ == s3; }
+    [[nodiscard]] bool getDMADelayedT2() const { return dma_state_ == sDelayedT2; }
 
-    uint32_t getDMAAddress() { return dmaAddressHigh(dmac_.getActiveChannel()) + dmac_.getAddress(); }
+    [[nodiscard]] uint32_t getDMAAddress() const {
+        return dmaAddressHigh(dmac_.getActiveChannel()) + dmac_.getAddress();
+    }
 
     void setLock(bool lock) { lock_ = lock; }
-    uint8_t getIRQLines() { return pic_.getIRQLines(); }
+    [[nodiscard]] uint8_t getIRQLines() const { return pic_.getIRQLines(); }
 
-    uint8_t getDMAS() {
+    [[nodiscard]] uint8_t getDMAS() const {
         if (dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
             dma_state_ == sWait)
             return 3;
@@ -478,29 +480,34 @@ public:
         return 0;
     }
 
-    uint8_t getCGA() { return cga_phase_ >> 2; }
+    [[nodiscard]] uint8_t getCGA() const { return cga_phase_ >> 2; }
 
 private:
-    bool dmaReady() {
+    [[nodiscard]] bool dmaReady() const {
         if (dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait || dma_state_ == s4 ||
             dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/)
             return false;
         return true;
     }
 
-    bool nonDMAReady() {
+    [[nodiscard]] bool nonDMAReady() const {
         if (type_ == 1 || type_ == 2) // Read port, write port
             return cycle_ > 2; // System board adds a wait state for onboard IO devices
         return true;
     }
 
-    bool dack0() { return dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait; }
+    [[nodiscard]] bool dack0() const {
+        return dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait;
+    }
 
     void setSpeakerOutput() {
-        bool o = !(counter2_output_ && speaker_mask_);
+        const bool o = !(counter2_output_ && speaker_mask_);
 
         const auto pit_ticks = pit_.getTicks();
-        speaker_callback_(pit_ticks, counter2_output_, speaker_mask_);
+        // Headless execution may not attach an audio output callback.
+        if (speaker_callback_) {
+            speaker_callback_(pit_ticks, counter2_output_, speaker_mask_);
+        }
 
         if (next_speaker_output_ != o) {
             if (speaker_output_ == o) {
@@ -529,7 +536,7 @@ private:
             }
         }
 
-        bool speakerMask = ppi_.getB(1);
+        const bool speakerMask = ppi_.getB(1);
         if (speakerMask != speaker_mask_) {
             speaker_mask_ = speakerMask;
             setSpeakerOutput();
@@ -553,7 +560,7 @@ private:
         }
     }
 
-    uint32_t dmaAddressHigh(const int channel) {
+    [[nodiscard]] uint32_t dmaAddressHigh(const int channel) const {
         // static const int pageRegister[4] = {0x83, 0x83, 0x81, 0x82};
         return static_cast<uint32_t>(dma_pages_[channel & 3]) << 16;
     }
