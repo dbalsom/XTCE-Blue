@@ -1,13 +1,8 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Daniel Balsom
 #include "Crtc.h"
-#include <iostream>
 
-Crtc6845::Crtc6845() {
-    reg_.fill(0);
-    cursor_data_.fill(false);
-    // Default blink rate = fast
-    has_cursor_blink_rate_ = true;
-    cursor_blink_rate_ = BLINK_FAST_RATE;
-}
+Crtc6845::Crtc6845() { reset(); }
 
 // Write to a CRTC register.
 // rel_port: 0 = address/select, 1 = data
@@ -42,6 +37,7 @@ uint8_t Crtc6845::read(const uint16_t rel_port) const {
 
 void Crtc6845::select_register(const uint8_t idx) {
     if (idx > REGISTER_MAX) {
+        reg_select_ = CrtcRegister::InvalidRegister;
         return;
     }
     switch (idx) {
@@ -127,7 +123,7 @@ void Crtc6845::write_register(const uint8_t byte) {
         case CrtcRegister::VerticalTotal:
             // R4: 7-bit
             reg_[4] = static_cast<uint8_t>(byte & 0x7F);
-            //std::cout << "CRTC Register Write (04h): VerticalTotal updated: " << static_cast<unsigned>(reg_[4]);
+            // std::cout << "CRTC Register Write (04h): VerticalTotal updated: " << static_cast<unsigned>(reg_[4]);
             break;
 
         case CrtcRegister::VerticalTotalAdjust:
@@ -144,7 +140,7 @@ void Crtc6845::write_register(const uint8_t byte) {
             // R7: 7-bit
             reg_[7] = static_cast<uint8_t>(byte & 0x7F);
             trace_regs_();
-            //std::cout <<  "CRTC Register Write (07h): VerticalSync updated: " << static_cast<unsigned>(reg_[7]);
+            // std::cout <<  "CRTC Register Write (07h): VerticalSync updated: " << static_cast<unsigned>(reg_[7]);
             break;
 
         case CrtcRegister::InterlaceMode:
@@ -155,59 +151,58 @@ void Crtc6845::write_register(const uint8_t byte) {
         case CrtcRegister::MaximumScanlineAddress:
             // R9: 5-bit
             reg_[9] = static_cast<uint8_t>(byte & 0x1F);
-            update_cursor_data();
             break;
 
         case CrtcRegister::CursorStartLine:
-        {
-            // R10: 7-bit field; includes cursor attrs in upper nibble
-            reg_[10] = static_cast<uint8_t>(byte & 0x7F);
+            {
+                // R10: 7-bit field; includes cursor attrs in upper nibble
+                reg_[10] = static_cast<uint8_t>(byte & 0x7F);
 
-            cursor_start_line_ = static_cast<uint8_t>(byte & CURSOR_LINE_MASK);
+                cursor_start_line_ = static_cast<uint8_t>(byte & CURSOR_LINE_MASK);
 
-            // IMPORTANT: parentheses — we want (byte & mask) >> 4
-            const uint8_t attr = static_cast<uint8_t>((byte & CURSOR_ATTR_MASK) >> 5);
-            switch (attr) {
-                case 0b00:
-                    cursor_enabled_ = true;
-                    has_cursor_blink_rate_ = false; // solid
-                    break;
-                case 0b01:
-                    cursor_enabled_ = false; // disabled (some hardware still blinks visually, but we gate here)
-                    has_cursor_blink_rate_ = false;
-                    break;
-                case 0b10:
-                    cursor_enabled_ = true;
-                    has_cursor_blink_rate_ = true;
-                    cursor_blink_rate_ = BLINK_FAST_RATE;
-                    break;
-                default:
-                    cursor_enabled_ = true;
-                    has_cursor_blink_rate_ = true;
-                    cursor_blink_rate_ = BLINK_SLOW_RATE;
-                    break;
+                // IMPORTANT: parentheses — we want (byte & mask) >> 4
+                const uint8_t attr = static_cast<uint8_t>((byte & CURSOR_ATTR_MASK) >> 5);
+                switch (attr) {
+                    case 0b00:
+                        cursor_enabled_ = true;
+                        has_cursor_blink_rate_ = false; // solid
+                        break;
+                    case 0b01:
+                        cursor_enabled_ = false; // disabled (some hardware still blinks visually, but we gate here)
+                        has_cursor_blink_rate_ = false;
+                        break;
+                    case 0b10:
+                        cursor_enabled_ = true;
+                        has_cursor_blink_rate_ = true;
+                        cursor_blink_rate_ = BLINK_FAST_RATE;
+                        break;
+                    default:
+                        cursor_enabled_ = true;
+                        has_cursor_blink_rate_ = true;
+                        cursor_blink_rate_ = BLINK_SLOW_RATE;
+                        break;
+                }
+                break;
             }
-            update_cursor_data();
-            break;
-        }
 
         case CrtcRegister::CursorEndLine:
             // R11: 5-bit
             reg_[11] = static_cast<uint8_t>(byte & CURSOR_LINE_MASK);
-            update_cursor_data();
             break;
 
         case CrtcRegister::StartAddressH:
             // R12: 6-bit
             reg_[12] = static_cast<uint8_t>(byte & 0x3F);
-            //std::cout << "CRTC Register Write (0Ch): StartAddressH updated: " << std::hex << std::uppercase << static_cast<unsigned>(byte);
+            // std::cout << "CRTC Register Write (0Ch): StartAddressH updated: " << std::hex << std::uppercase <<
+            // static_cast<unsigned>(byte);
             update_start_address();
             break;
 
         case CrtcRegister::StartAddressL:
             // R13: 8-bit
             reg_[13] = byte;
-            //std::cout << "CRTC Register Write (0Dh): StartAddressL updated: " << std::hex << std::uppercase << static_cast<unsigned>(byte);
+            // std::cout << "CRTC Register Write (0Dh): StartAddressL updated: " << std::hex << std::uppercase <<
+            // static_cast<unsigned>(byte);
             update_start_address();
             break;
 
@@ -225,6 +220,7 @@ void Crtc6845::write_register(const uint8_t byte) {
 
         case CrtcRegister::LightPenPositionH:
         case CrtcRegister::LightPenPositionL:
+        case CrtcRegister::InvalidRegister:
             // R16: read-only
             // R17: read-only
             break;
@@ -251,41 +247,15 @@ void Crtc6845::update_cursor_address() {
     cursor_address_ = static_cast<uint16_t>((static_cast<uint16_t>(reg_[14]) << 8) | reg_[15]);
 }
 
-void Crtc6845::update_cursor_data() {
-    cursor_data_.fill(false);
-
-    // If start line > max scanline, cursor never shown
-    if (reg_[10] > reg_[9]) {
-        return;
-    }
-
-    if (reg_[10] <= reg_[11]) {
-        // normal contiguous
-        for (uint8_t i = reg_[10]; i <= reg_[11]; ++i) {
-            if (i < CRTC_ROW_MAX)
-                cursor_data_[i] = true;
-        }
-        cursor_start_line_ = reg_[10];
-        cursor_end_line_ = reg_[11];
-    }
-    else {
-        // split cursor (wraps)
-        for (uint8_t i = 0; i <= reg_[11] && i < CRTC_ROW_MAX; ++i) {
-            cursor_data_[i] = true;
-        }
-        for (auto i = static_cast<size_t>(reg_[10]); i < CRTC_ROW_MAX; ++i) {
-            cursor_data_[i] = true;
-        }
-        cursor_start_line_ = reg_[10];
-        cursor_end_line_ = static_cast<uint8_t>(CRTC_ROW_MAX - 1);
-    }
+void Crtc6845::latch_lightpen() {
+    lightpen_position_ = vma_;
+    reg_[16] = static_cast<uint8_t>((lightpen_position_ >> 8) & 0x3F);
+    reg_[17] = static_cast<uint8_t>(lightpen_position_);
 }
 
 // Return the immediate status of the cursor
 bool Crtc6845::cursor_immediate() const {
-    bool cur = cursor_enabled_
-        && (vma_ == cursor_address_)
-        && cursor_data_[static_cast<size_t>(vlc_c9_ & 0x1F)];
+    bool cur = cursor_enabled_ && (vma_ == cursor_address_) && cursor_active_;
 
     if (has_cursor_blink_rate_) {
         cur = cur && blink_state_;
@@ -295,190 +265,185 @@ bool Crtc6845::cursor_immediate() const {
 
 // Tick the CRTC
 // Returns (status_ptr, current_vma)
-std::pair<const Crtc6845::CrtcStatusBits*, uint16_t>
-Crtc6845::tick(const HBlankCallback& hblank_cb) {
-    // transient pulses low unless we fire them this tick
-    status_.hsync = false;
-    status_.vsync = false;
+std::pair<const Crtc6845::CrtcStatusBits*, uint16_t> Crtc6845::tick() {
+    // Sample equality before advancing counters, including R0=255 and R9=31.
+    const bool end_of_line = hcc_c0_ == reg_[0];
+    const bool end_of_character_row = vlc_c9_ == reg_[9];
+    const bool at_vertical_total = vcc_c4_ == reg_[4];
 
     if (hcc_c0_ == 0) {
-        status_.hborder = false;
-        if (vcc_c4_ == 0) {
+        if (vlc_c9_ == cursor_start_line_ && !in_vta_) {
+            cursor_active_ = true;
+        }
+        if (vcc_c4_ == 0 && vlc_c9_ == 0) {
             // We are at the first character of a CRTC frame. Update start address.
             vma_ = start_address_latch_;
         }
-    }
-
-    if (hcc_c0_ < 2) {
-        // When C0 < 2 evaluate last_line flag status.
-        // LOGON SYSTEM v1.6 pg 73
-        if (vcc_c4_ == reg_[4]) {
+        // Latch last-line status only at C0=0. Later register writes must not
+        // reevaluate it until the next scanline.
+        if (at_vertical_total) {
             last_row_ = true;
-            last_line_ = (vlc_c9_ == reg_[9]);
+            last_line_ = end_of_character_row && !previous_last_line_ && !in_hsync_;
             vtac_c5_ = 0;
+        }
+        else {
+            last_line_ = false;
         }
     }
 
     // Update horizontal character counter
     hcc_c0_++;
+    if (hcc_c0_ == 0) {
+        horizontal_de_ = true;
+        if (vcc_c4_ == 0) {
+            vma_ = start_address_latch_;
+        }
+    }
 
     // Advance video memory address offset
     vma_++;
-    char_col_ = 0;
 
     // Process horizontal blanking period
-    if (status_.hblank) {
-        // increment HSYNC counter
-        hsc_c3l_++;
+    if (in_hsync_) {
+        // Four-bit down-counter: loading zero gives a 16-character pulse.
+        hsc_c3l_ = (hsc_c3l_ - 1) & 0x0F;
 
-        // Allow the adapter to supply effective HSYNC width
-        const uint8_t eff = hblank_cb ? hblank_cb() : reg_[3];
-        hsync_target_ = std::min(eff, reg_[3]);
-
-        if (hsc_c3l_ == hsync_target_) {
-            // Logical end of scanline (fire HSYNC pulse)
-            if (status_.vblank) {
-                // Count VSYNC lines during vblank
-                //vsc_c3h_++;
+        if (hsc_c3l_ == 0) {
+            previous_last_line_ = at_vertical_total && end_of_character_row;
+            if (in_vsync_) {
+                // C3H advances at the end of CRTC HSYNC, independently of C0/R0.
+                ++vsc_c3h_;
                 if (vsc_c3h_ == CRTC_VBLANK_HEIGHT) {
                     in_last_vblank_line_ = true;
                     vsc_c3h_ = 0;
-                    status_.vsync = true;
+                    in_vsync_ = false;
                 }
             }
-
-            char_col_ = 0;
-            status_.hsync = true;
-        }
-
-        // End HBLANK when we reach R3 (sync width)
-        if (hsc_c3l_ == reg_[3]) {
-            status_.hblank = false;
-            hsc_c3l_ = 0;
+            in_hsync_ = false;
         }
     }
 
     if (hcc_c0_ == reg_[1]) {
         // C0 == R1. Entering right overscan.
-        if (vlc_c9_ == reg_[9]) {
+        if (end_of_character_row) {
             // Last scanline of this character row; save VMA' for next row
             vma_t_ = vma_;
         }
-        status_.den = false;
-        status_.hborder = true;
+        horizontal_de_ = false;
     }
 
     if (hcc_c0_ == reg_[2]) {
-        // Enter HBLANK at HorizontalSyncPosition
-        const uint8_t eff = hblank_cb ? hblank_cb() : reg_[3];
-        hsync_target_ = eff;
-        status_.hblank = true;
-        hsc_c3l_ = 0;
+        // Load the four-bit C3L down-counter at C0 == R2.
+        hsc_c3l_ = reg_[3] & 0x0F;
+        in_hsync_ = true;
     }
 
-    if ((hcc_c0_ == (reg_[0] + 1)) && in_last_vblank_line_) {
-        // Right before the new frame begins, draw one char of border.
-        // When we roll to +1 we clear VBLANK soon after.
-        status_.hborder = true;
-    }
-
-    if (hcc_c0_ == (reg_[0] + 1)) {
-        // C0 == R0: Leaving left overscan, finished scanning row
-
-        if (status_.vblank) {
-            // If we are in VBLANK, advance Vertical Sync Counter
-            vsc_c3h_ += 1;
+    if (end_of_line) {
+        // C0 == R0: end of scanline.
+        if (vlc_c9_ == reg_[11] && !in_vta_) {
+            cursor_active_ = false;
         }
 
         if (in_last_vblank_line_) {
             // Leave VBLANK after last line.
             in_last_vblank_line_ = false;
-            status_.vblank = false;
+            in_vsync_ = false;
         }
 
-        // Reset Horizontal Character Counter and increment character row counter
+        // Reset C0. Horizontal DE is independent of the vertical DE latch.
         hcc_c0_ = 0;
-        status_.hborder = false;
-        // Wrap vertical line counter (5 bits)
-        vlc_c9_ = (vlc_c9_ + 1) & 0x1F;
+        horizontal_de_ = true;
 
         // Return video memory address to starting position for next character row
         vma_ = vma_t_;
-        char_col_ = 0;
 
-        if (!status_.vblank && (vcc_c4_ < reg_[6])) {
-            // Start the new row
-            status_.den = true;
-            status_.hborder = false;
-        }
-
-        if (vlc_c9_ == reg_[9] + 1) {
+        if (end_of_character_row) {
             // C9 == R9 We finished drawing this row of characters
             vlc_c9_ = 0;
-            // Increment Vertical Character Counter for next row
-            vcc_c4_++;
+            // C4 must reach 128 after R4=127. Frame management resets it;
+            // masking to seven bits here makes the following comparisons wrong.
+            ++vcc_c4_;
             // Set vma to starting position for next character row
             vma_ = vma_t_;
 
             if (vcc_c4_ == reg_[7]) {
                 // C4 == R7: We've reached vertical sync
-                status_.vblank = true;
-                status_.den = false;
+                in_vsync_ = true;
 
                 if (has_cursor_blink_rate_) {
-                    cursor_blink_ct_++;
-                    if (cursor_blink_ct_ == cursor_blink_rate_) {
-                        cursor_blink_ct_ = 0;
+                    if (frames_ % cursor_blink_rate_ == 0) {
                         blink_state_ = !blink_state_;
                     }
                 }
             }
 
             if (last_line_) {
-                in_vta_ = true;
-                last_row_ = false;
-                last_line_ = false;
+                process_last_line();
+            }
+        }
+        else {
+            // Wrap only after testing the current five-bit scanline counter.
+            vlc_c9_ = (vlc_c9_ + 1) & 0x1F;
+            if (vlc_c9_ == cursor_start_line_ && !in_vta_) {
+                cursor_active_ = true;
             }
         }
 
         if (vcc_c4_ == reg_[6]) {
             // C4 == R6: Enter lower overscan area.
-            status_.den = false;
-            status_.vborder = true;
+            vertical_de_ = false;
         }
 
-        // if (vcc_c4_ == reg_[4] + 1) {
-        //     // We are at vertical total, start incrementing vertical total adjust counter.
-        //     in_vta_ = true;
-        // }
-
         if (in_vta_) {
-            // We are in vertical total adjust.
-            if (vtac_c5_ == reg_[5]) {
-                // We have reached vertical total adjust. We are at the end of the top overscan.
-                in_vta_ = false;
-                vtac_c5_ = 0;
-                hcc_c0_ = 0;
-                vcc_c4_ = 0;
-                vlc_c9_ = 0;
-                char_col_ = 0;
-
-                start_address_latch_ = start_address_;
-                vma_ = start_address_;
-                vma_t_ = vma_;
-
-                status_.den = true;
-                status_.vborder = false;
-                status_.vblank = false;
-            }
-            else {
-                vtac_c5_++;
+            // Match MartyPC's increment-before-comparison order. C5 can reach 32
+            // when R5=31; lowering R5 ends adjust on the next scanline.
+            ++vtac_c5_;
+            if (vtac_c5_ > reg_[5]) {
+                process_start_of_frame();
             }
         }
     }
 
-    // Update cursor bit based on current position
-    status_.cursor = cursor_immediate();
-
+    update_status();
     return {&status_, vma_};
+}
+
+void Crtc6845::process_last_line() {
+    if (in_vta_) {
+        return;
+    }
+    if (reg_[5] != 0) {
+        in_vta_ = true;
+        last_row_ = false;
+        last_line_ = false;
+    }
+    else {
+        process_start_of_frame();
+    }
+}
+
+void Crtc6845::process_start_of_frame() {
+    ++frames_;
+    in_vta_ = false;
+    last_row_ = false;
+    last_line_ = false;
+    vtac_c5_ = 0;
+    vcc_c4_ = 0;
+    vlc_c9_ = 0;
+    start_address_latch_ = start_address_;
+    vma_ = start_address_;
+    vma_t_ = vma_;
+    horizontal_de_ = true;
+    vertical_de_ = true;
+    in_vsync_ = false;
+    // C3H is deliberately retained, as in MartyPC.
+}
+
+void Crtc6845::update_status() {
+    status_.cursor = cursor_immediate();
+    status_.den = den();
+    status_.hblank = status_.hsync = in_hsync_;
+    status_.vblank = status_.vsync = in_vsync_;
+    status_.hborder = !horizontal_de_;
+    status_.vborder = !vertical_de_;
 }

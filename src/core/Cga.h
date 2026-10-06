@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 
@@ -19,6 +20,11 @@ struct CgaDebugState
 {
     uint64_t ticks;
     uint64_t frame_count;
+    uint64_t crtc_vsync_starts;
+    uint64_t crtc_vsync_ends;
+    uint64_t rejected_vsyncs;
+    bool vsync_pending;
+    uint32_t beam_y;
     uint8_t mode_byte;
     bool mode_hires_text : 1;
     bool mode_graphics : 1;
@@ -275,6 +281,8 @@ public:
 
         monitor_hsync_ = false;
         monitor_vsync_ = false;
+        monitor_hsync_countdown_ = 0;
+        monitor_vsync_pending_ = false;
         beam_x_ = 0;
         beam_y_ = 0;
         scanline_ = 0;
@@ -289,12 +297,20 @@ public:
         cur_attr_ = 0;
 
         frame_count_ = 0;
+        crtc_vsync_starts_ = 0;
+        crtc_vsync_ends_ = 0;
+        rejected_vsyncs_ = 0;
     }
 
     [[nodiscard]] CgaDebugState getDebugState() const {
         CgaDebugState state{};
         state.ticks = ticks_;
         state.frame_count = frame_count_;
+        state.crtc_vsync_starts = crtc_vsync_starts_;
+        state.crtc_vsync_ends = crtc_vsync_ends_;
+        state.rejected_vsyncs = rejected_vsyncs_;
+        state.vsync_pending = monitor_vsync_pending_;
+        state.beam_y = beam_y_;
         state.mode_byte = mode_byte_;
         state.mode_hires_text = mode_hires_text_;
         state.mode_graphics = mode_graphics_;
@@ -345,7 +361,12 @@ public:
 
     void clearLPLatch() { lp_latch_ = false; }
 
-    void setLPLatch() { lp_latch_ = true; };
+    void setLPLatch() {
+        if (!lp_latch_) {
+            crtc_.latch_lightpen();
+        }
+        lp_latch_ = true;
+    }
 
     void tick() {
         ticks_++;
@@ -357,27 +378,32 @@ public:
                 tick_hchar();
             }
 
-            // Provide an HBlankCallback that returns the required value (5).
-            // crtc_.tick expects a std::function<uint8_t(void)>.
-            auto [status, vma] = crtc_.tick(
-                [this]() -> uint8_t
-                {
-                    if (clock_divisor_ == 1) {
-                        return 10;
-                    }
-                    else {
-                        return 5;
-                    }
-                });
+            const bool was_hsync = crtc_.hsync();
+            const bool was_vsync = crtc_.vsync();
+            auto [status, vma] = crtc_.tick();
             vma_ = vma;
-            if (status->vsync) {
-                // std::cout << "CGA: VSYNC asserted at beamX=" << beamX_ << " beamY=" << beamY_ << "\n";
-                vsync();
 
-                updateCursorBlink();
+            if (!was_vsync && status->vsync) {
+                ++crtc_vsync_starts_;
             }
-            if (status->hsync) {
+
+            // CRTC sync outputs are levels. Keep XTCE's monitor flyback timing
+            // here, outside the CRTC, and trigger each flyback only once.
+            if (was_vsync && !status->vsync) {
+                ++crtc_vsync_ends_;
+                monitor_vsync_pending_ = true;
+            }
+            if (monitor_hsync_countdown_ != 0 && --monitor_hsync_countdown_ == 0) {
+                if (monitor_vsync_pending_) {
+                    monitor_vsync_pending_ = false;
+                    vsync();
+                }
                 hsync();
+            }
+            if (!was_hsync && status->hsync) {
+                const uint8_t width = crtc_.get_registers()[3] & 0x0F;
+                const uint8_t monitor_width = clock_divisor_ == 1 ? 10 : 5;
+                monitor_hsync_countdown_ = std::min<uint8_t>(width == 0 ? 16 : width, monitor_width);
             }
             fetch_char();
             updateClock();
@@ -478,6 +504,8 @@ private:
     // Monitor simulation
     bool monitor_hsync_{false};
     bool monitor_vsync_{false};
+    uint8_t monitor_hsync_countdown_{0};
+    bool monitor_vsync_pending_{false};
     uint32_t beam_x_{0};
     uint32_t beam_y_{0};
     uint32_t scanline_{0};
@@ -495,6 +523,9 @@ private:
     uint8_t cur_attr_{0};
 
     uint64_t frame_count_{0};
+    uint64_t crtc_vsync_starts_{0};
+    uint64_t crtc_vsync_ends_{0};
+    uint64_t rejected_vsyncs_{0};
 
 
     static constexpr auto CGA_LOWRES_GFX_TABLE = makeCgaLowresGraphicsTable();
@@ -757,9 +788,12 @@ private:
             frame_count_++;
 
             // Swap the display buffers
-            // std::cout << "vsync: swapping buffers\n";
             swap();
+            // Advance the cursor and text blink dividers once per completed frame.
             updateCursorBlink();
+        }
+        else {
+            ++rejected_vsyncs_;
         }
     }
 

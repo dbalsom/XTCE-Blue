@@ -87,7 +87,6 @@ void CGA::updateMode() {
     if (mode_hires_text_ != ((mode_byte_ & MODE_HIRES_TEXT) != 0)) {
         // Flag the clock for pending change.  The clock can only be changed in phase with
         // LCHAR due to our dynamic clocking logic.
-        std::cout << "CGA: Clock change pending";
         clock_pending_ = true;
     }
 
