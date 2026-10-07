@@ -515,7 +515,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->blip_buf.bass_freq(200); // 200Hz high-pass filter to reduce bass rumble
     // PIT clock is (crystal / 12) or ~ 1.19318 MHz
     ctx->blip_buf.clock_rate(static_cast<long>(ctx->crystal_hz / 12.0));
-    ctx->blip_synth.volume(0.02625);
+    ctx->blip_synth.volume(0.25);
     ctx->blip_synth.output(&ctx->blip_buf);
 
     const blip_eq_t eq(0.0, // 0dB = fairly flat highs
