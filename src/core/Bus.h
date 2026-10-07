@@ -3,24 +3,25 @@
 #include <cstdint>
 #include <vector>
 
-#include "bios.h"
 #include "Cga.h"
 #include "Dmac.h"
+#include "Fdc.h"
+#include "Keyboard.h"
 #include "Pic.h"
 #include "Pit.h"
 #include "Ppi.h"
-#include "Fdc.h"
-#include "Keyboard.h"
+#include "bios.h"
 
 #define ROM_BASE_ADDRESS 0xFE000
 #define CONVENTIONAL_RAM_SIZE 0xB8000
 #define CGA_ADDRESS 0xB8000
+// The 32 KiB CPU aperture mirrors CGA's 16 KiB VRAM (address bit 14 is ignored).
+#define CGA_APERTURE_SIZE 0x8000
 
 class Bus
 {
 public:
-    Bus() :
-        ram_(CONVENTIONAL_RAM_SIZE), rom_(0x2000) {
+    Bus() : ram_(CONVENTIONAL_RAM_SIZE), rom_(0x2000) {
         rom_.assign(U18, U18 + sizeof(U18));
         pit_.setGate(0, true);
         pit_.setGate(1, true);
@@ -54,7 +55,7 @@ public:
             }
             return 0xff;
         }
-        if (address >= CGA_ADDRESS && address < CGA_ADDRESS + 0x4000) {
+        if (address >= CGA_ADDRESS && address < CGA_ADDRESS + CGA_APERTURE_SIZE) {
             return cga_.readMem(address - CGA_ADDRESS);
         }
         if (address >= CONVENTIONAL_RAM_SIZE) {
@@ -90,8 +91,7 @@ public:
         previous_passive_or_halt_ = true;
         last_non_dma_ready_ = true;
         cga_phase_ = 0;
-        last_kb_disabled_ = false;
-        last_kb_cleared_ = false;
+        last_kb_disabled_ = true;
         last_irq6_ = false;
     }
 
@@ -102,9 +102,10 @@ public:
         last_counter0_output_ = true;
     }
 
-    void setSpeakerCallback(PcSpeakerCallback callback) {
-        speaker_callback_ = std::move(callback);
-    }
+    void setSpeakerCallback(PcSpeakerCallback callback) { speaker_callback_ = std::move(callback); }
+
+    // Use the same cached level supplied to the speaker callback.
+    [[nodiscard]] bool speakerLevel() const { return counter2_output_ && speaker_mask_; }
 
     void startAccess(const uint32_t address, const int type) {
         address_ = address;
@@ -114,11 +115,13 @@ public:
 
     void tick() {
         _ticks++;
-        cga_.tick();
+        for (int i = 0; i < 3; ++i) {
+            cga_.tick();
+        }
         cga_phase_ = (cga_phase_ + 3) & 0x0f;
         pit_phase_++;
 
-        // Handle PIT updates every 4 ticks
+        // Handle PIT updates every 4 CPU cycles.
         if (pit_phase_ == 4) {
             pit_phase_ = 0;
             pit_.tick();
@@ -152,53 +155,23 @@ public:
             }
         }
 
-        if ((_ticks & 0xF) == 0) {
-            // Check and clear the keyboard
-            const auto kb_cleared = ppi_.getB(7);
-            const auto kb_disabled = !ppi_.getB(6);
-            if (kb_disabled && !last_kb_disabled_) {
-                // Keyboard was just disabled.
-                std::cout << "Bus: Disabling keyboard" << std::endl;
-                kb_.setClockLineState(false);
-            }
-            else if (!kb_disabled && last_kb_disabled_) {
-                // Keyboard was just enabled.
-                std::cout << "Bus: Enabling keyboard" << std::endl;
-                kb_.setClockLineState(true);
-            }
-
-            if (kb_cleared && !last_kb_cleared_) {
-                // KSR was just cleared.
-                std::cout << "Bus: Clearing KSR & Interrupt" << std::endl;
-                // Clear any pending IRQ 1.
-                pic_.setIRQLine(1, false);
-                // Clear the KSR attached to PPI port A.
-                for (int i = 0; i < 8; ++i) {
-                    ppi_.setA(i, false);
-                }
-            }
-            else if (!kb_disabled && last_kb_disabled_) {
-                // Keyboard was just enabled.
-                std::cout << "Bus: Re-enabling keyboard" << std::endl;
-            }
-            last_kb_disabled_ = kb_disabled;
-            last_kb_cleared_ = kb_cleared;
-        }
-
         if ((_ticks & 0x3FFF) == 0) {
-            // Slow tick = ~1.144ms. Good for ticking ms-scale delays.
+            // Slow tick = ~3.43ms at 4.77MHz. Good for ticking ms-scale delays.
 
             // Tick the keyboard. The keyboard needs to be ticked to produce reset bytes after a delay when reset,
             // and to produce type-matic repeat keys.
             kb_.tick();
             if (uint8_t b = 0; ppi_.getB(6) && (pic_.getIRQLines() & 0x02) == 0 && kb_.getScanCode(b)) {
-                // Keyboard-originated scancode (reset byte or type-matic key)
-                std::cout << std::format("Keyboard generated scancode: {:02X}", b) << std::endl;
-                for (int i = 0; i < 8; ++i) {
-                    const auto bit = (b >> i) & 1;
-                    ppi_.setA(i, bit != 0);
+                // PB7 holds the shift register clear and suppresses IRQ1. With
+                // the clock running, bytes sent during clear are discarded.
+                if (!ppi_.getB(7)) {
+                    std::cout << std::format("Keyboard generated scancode: {:02X}", b) << std::endl;
+                    for (int i = 0; i < 8; ++i) {
+                        const auto bit = (b >> i) & 1;
+                        ppi_.setA(i, bit != 0);
+                    }
+                    pic_.setIRQLine(1, true);
                 }
-                pic_.setIRQLine(1, true);
             }
 
             // Tick the FDC. The FDC needs to be ticked to simulate operational delays.
@@ -228,8 +201,8 @@ public:
         if (type_ != 2 || (address_ & 0x3e0) != 0x000 || !hasDMACFix) {
             last_non_dma_ready_ = nonDMAReady();
         }
-        //if (_previousLock && !_lock)
-        //    _previousLock = false;
+        // if (_previousLock && !_lock)
+        //     _previousLock = false;
         //_previousLock = _lock;
         switch (dma_state_) {
             case sIdle:
@@ -246,14 +219,14 @@ public:
                     dma_state_ = sAEN;
                 }
                 break;
-            //case sHoldWait:
-            //    if (_passiveOrHalt && !_previousLock)
-            //        _dmaState = _lastNonDMAReady ? sAEN : sPreAEN;
-            //    break;
-            //case sPreAEN:
-            //    if (_lastNonDMAReady)
-            //        _dmaState = sAEN;
-            //    break;
+            // case sHoldWait:
+            //     if (_passiveOrHalt && !_previousLock)
+            //         _dmaState = _lastNonDMAReady ? sAEN : sPreAEN;
+            //     break;
+            // case sPreAEN:
+            //     if (_lastNonDMAReady)
+            //         _dmaState = sAEN;
+            //     break;
             case sAEN:
                 dma_state_ = s0;
                 break;
@@ -275,7 +248,7 @@ public:
                     }
                     else if (dmac_.isWriting()) {
                         const auto b = fdc_.dmaDeviceRead();
-                        //std::cout << std::format("DMAC Channel 2 WRITE to address {:02X}->{:05X}\n", b, addr);
+                        // std::cout << std::format("DMAC Channel 2 WRITE to address {:02X}->{:05X}\n", b, addr);
                         ram_[addr & 0xFFFFF] = b;
                     }
                     dmac_.service();
@@ -286,7 +259,6 @@ public:
                             addr, dma_pages_[2]);
                         fdc_.dmaDeviceEOP();
                     }
-
                 }
                 else {
                     dmac_.service();
@@ -320,9 +292,7 @@ public:
         ++cycle_;
     }
 
-    bool ready() {
-        return dmaReady() && nonDMAReady();
-    }
+    bool ready() { return dmaReady() && nonDMAReady(); }
 
     void write(uint8_t data) {
         if (type_ == 2) {
@@ -381,7 +351,7 @@ public:
             if (address_ < CONVENTIONAL_RAM_SIZE) {
                 ram_[address_] = data;
             }
-            else if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + 0x4000) {
+            else if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + CGA_APERTURE_SIZE) {
                 cga_.writeMem(address_ - CGA_ADDRESS, data);
             }
         }
@@ -392,8 +362,8 @@ public:
             // Interrupt acknowledge
             auto i = pic_.interruptAcknowledge();
             if (i != 0xFF && i != 0x08) {
-                std::cout << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n" <<
-                    std::flush;
+                std::cout << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n"
+                          << std::flush;
             }
             return i;
         }
@@ -401,7 +371,7 @@ public:
             // IO read
 
             // noisy trace debu
-            //std::cout << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
+            // std::cout << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
 
             // Read from IO port
             switch (address_ & 0x3e0) {
@@ -410,19 +380,19 @@ public:
                 case 0x20:
                     return pic_.read(address_ & 1);
                 case 0x40:
-                {
-                    const uint8_t b = pit_.read(address_ & 3);
-                    // std::cout << "PIT read from port " << std::hex << (_address & 3)
-                    //     << ": " << std::hex << static_cast<int>(b) << std::dec << "\n";
-                    return b;
-                }
+                    {
+                        const uint8_t b = pit_.read(address_ & 3);
+                        // std::cout << "PIT read from port " << std::hex << (_address & 3)
+                        //     << ": " << std::hex << static_cast<int>(b) << std::dec << "\n";
+                        return b;
+                    }
                 case 0x60:
-                {
-                    //std::cout << "PPI read from port " << std::hex << (_address & 3) << std::dec << "\n";
-                    const uint8_t b = ppi_.read(address_ & 3);
-                    updatePPI();
-                    return b;
-                }
+                    {
+                        // std::cout << "PPI read from port " << std::hex << (_address & 3) << std::dec << "\n";
+                        const uint8_t b = ppi_.read(address_ & 3);
+                        updatePPI();
+                        return b;
+                    }
                 case 0x80:
                     switch (address_) {
                         case 0x87:
@@ -442,7 +412,7 @@ public:
                 case 0x3E0:
                     return fdc_.readIO(address_ & 7);
                 default:
-                    //std::cout << "Unhandled IO read from port " << std::hex << _address << std::dec << "\n";
+                    // std::cout << "Unhandled IO read from port " << std::hex << _address << std::dec << "\n";
                     return 0xFF;
             }
         }
@@ -454,7 +424,7 @@ public:
             // Read from ROM.
             return rom_[address_ - ROM_BASE_ADDRESS];
         }
-        if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + 0x4000) {
+        if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + CGA_APERTURE_SIZE) {
             return cga_.readMem(address_ - CGA_ADDRESS);
         }
         // No match? Return open bus.
@@ -463,25 +433,21 @@ public:
 
     bool interruptPending() { return pic_.interruptPending(); }
 
-    int pitBits() {
-        return (pit_phase_ == 1 || pit_phase_ == 2 ? 1 : 0) +
-            (counter2_gate_ ? 2 : 0) + (pit_.getOutput(2) ? 4 : 0);
+    [[nodiscard]] int pitBits() const {
+        return (pit_phase_ == 1 || pit_phase_ == 2 ? 1 : 0) + (counter2_gate_ ? 2 : 0) + (pit_.getOutput(2) ? 4 : 0);
     }
 
-    void setPassiveOrHalt(bool v) { passive_or_halt_ = v; }
+    void setPassiveOrHalt(const bool v) { passive_or_halt_ = v; }
 
     [[nodiscard]] bool getAEN() const {
-        return dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 ||
-            dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait ||
-            dma_state_ == s4;
+        return dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
+            dma_state_ == sWait || dma_state_ == s4;
     }
 
-    uint8_t getDMA() {
-        return dmac_.getRequestLines() | (dack0() ? 0x10 : 0);
-    }
+    [[nodiscard]] uint8_t getDMA() const { return dmac_.getRequestLines() | (dack0() ? 0x10 : 0); }
 
     std::string snifferExtra() {
-        return ""; //hex(_pit.getMode(1), 4, false) + " ";
+        return ""; // hex(_pit.getMode(1), 4, false) + " ";
     }
 
     [[nodiscard]] int getBusOperation() const {
@@ -495,56 +461,53 @@ public:
         }
     }
 
-    bool getDMAS3() { return dma_state_ == s3; }
-    bool getDMADelayedT2() { return dma_state_ == sDelayedT2; }
+    [[nodiscard]] bool getDMAS3() const { return dma_state_ == s3; }
+    [[nodiscard]] bool getDMADelayedT2() const { return dma_state_ == sDelayedT2; }
 
-    uint32_t getDMAAddress() {
+    [[nodiscard]] uint32_t getDMAAddress() const {
         return dmaAddressHigh(dmac_.getActiveChannel()) + dmac_.getAddress();
     }
 
     void setLock(bool lock) { lock_ = lock; }
-    uint8_t getIRQLines() { return pic_.getIRQLines(); }
+    [[nodiscard]] uint8_t getIRQLines() const { return pic_.getIRQLines(); }
 
-    uint8_t getDMAS() {
-        if (dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 ||
-            dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait)
+    [[nodiscard]] uint8_t getDMAS() const {
+        if (dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
+            dma_state_ == sWait)
             return 3;
-        if (dma_state_ == sHRQ || dma_state_ == sHoldWait ||
-            dma_state_ == sPreAEN)
+        if (dma_state_ == sHRQ || dma_state_ == sHoldWait || dma_state_ == sPreAEN)
             return 1;
         return 0;
     }
 
-    uint8_t getCGA() {
-        return cga_phase_ >> 2;
-    }
+    [[nodiscard]] uint8_t getCGA() const { return cga_phase_ >> 2; }
 
-private
-:
-    bool dmaReady() {
-        if (dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
-            dma_state_ == sWait || dma_state_ == s4 || dma_state_ == sDelayedT1 ||
-            dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/)
+private:
+    [[nodiscard]] bool dmaReady() const {
+        if (dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait || dma_state_ == s4 ||
+            dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/)
             return false;
         return true;
     }
 
-    bool nonDMAReady() {
+    [[nodiscard]] bool nonDMAReady() const {
         if (type_ == 1 || type_ == 2) // Read port, write port
             return cycle_ > 2; // System board adds a wait state for onboard IO devices
         return true;
     }
 
-    bool dack0() {
-        return dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
-            dma_state_ == sWait;
+    [[nodiscard]] bool dack0() const {
+        return dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait;
     }
 
     void setSpeakerOutput() {
-        bool o = !(counter2_output_ && speaker_mask_);
+        const bool o = !(counter2_output_ && speaker_mask_);
 
         const auto pit_ticks = pit_.getTicks();
-        speaker_callback_(pit_ticks, counter2_output_, speaker_mask_);
+        // Headless execution may not attach an audio output callback.
+        if (speaker_callback_) {
+            speaker_callback_(pit_ticks, counter2_output_, speaker_mask_);
+        }
 
         if (next_speaker_output_ != o) {
             if (speaker_output_ == o) {
@@ -558,7 +521,22 @@ private
     }
 
     void updatePPI() {
-        bool speakerMask = ppi_.getB(1);
+        // Apply keyboard control lines at the port access, so even a short
+        // acknowledge pulse clears the shift register before the next read.
+        const bool kb_disabled = !ppi_.getB(6);
+        if (kb_disabled != last_kb_disabled_) {
+            kb_.setClockLineState(!kb_disabled);
+            last_kb_disabled_ = kb_disabled;
+        }
+        if (ppi_.getB(7)) {
+            // Clear is level-sensitive, not just a rising-edge action.
+            pic_.setIRQLine(1, false);
+            for (int i = 0; i < 8; ++i) {
+                ppi_.setA(i, false);
+            }
+        }
+
+        const bool speakerMask = ppi_.getB(1);
         if (speakerMask != speaker_mask_) {
             speaker_mask_ = speakerMask;
             setSpeakerOutput();
@@ -580,11 +558,10 @@ private
             ppi_.setC(2, (dip_switch1_ & 0x40) != 0);
             ppi_.setC(3, (dip_switch1_ & 0x80) != 0);
         }
-
     }
 
-    uint32_t dmaAddressHigh(const int channel) {
-        //static const int pageRegister[4] = {0x83, 0x83, 0x81, 0x82};
+    [[nodiscard]] uint32_t dmaAddressHigh(const int channel) const {
+        // static const int pageRegister[4] = {0x83, 0x83, 0x81, 0x82};
         return static_cast<uint32_t>(dma_pages_[channel & 3]) << 16;
     }
 
@@ -641,9 +618,7 @@ private
     bool previous_passive_or_halt_;
     bool last_non_dma_ready_;
     uint8_t cga_phase_;
-    bool last_kb_disabled_{false};
-    bool last_kb_cleared_{false};
+    bool last_kb_disabled_{true};
     PcSpeakerCallback speaker_callback_{nullptr};
-    uint64_t
-    _ticks{0};
+    uint64_t _ticks{0};
 };

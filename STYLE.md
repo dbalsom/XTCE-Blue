@@ -31,6 +31,11 @@ K&R Brace style. Always use braces for if and for loops - no dangling statements
         bar();
 ```
 
+## If Statements
+
+Keep variable declarations before `if` statements rather than moving them into an `if` init-statement.
+The CLion inspection `CppTooWideScopeInitStatement` is disabled for this project.
+
 ## Naming Conventions
 - Types (classes, structs, enum class): PascalCase (UpperCamelCase)
 - Free functions and methods: lowerCamelCase (camelBack)

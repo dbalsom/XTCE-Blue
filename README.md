@@ -4,7 +4,7 @@ XTCE-Blue is a fork of [reenigne's XTCE 8088 emulator](https://github.com/reenig
 
 ## About XTCE
 
-XTCE is a cycle-interruptable, microcode-based 8088 emulation core. It was developed by the brilliant demo-coder reenigne, 
+XTCE is a cycle-interruptable, microcode-interpreting 8088 emulation core. It was developed by the brilliant demo-coder reenigne, 
 one of the programmers behind such amazing demos as [8088 MPH](https://www.youtube.com/watch?v=yHXx3orN35Y) and [Area 5150](https://www.youtube.com/watch?v=fWDxdoRTZPc). 
 He designed it to simulate the operation of his IBM 5160 in a cycle-exact manner, down to each DRAM refresh cycle.
 
@@ -16,8 +16,10 @@ With reenigne's blessing I aimed to take XTCE and make a fully fleshed out demon
 
 XTCE-Blue integrates several device implementations ported from [MartyPC](https://github.com/dbalsom/martypc), including its precise, overscan-aware CGA emulation.
 
+XTCE-Blue is the only other PC emulator besides MartyPC that can run the final 'lake' effect in the demo [Area 5150](https://www.pouet.net/prod.php?which=91938).
+
 ![8088mph_01](/images/8088mph_01.png)
-![area5150_01](/images/area5150_01.png)
+![area5150_01](/images/lake_effect_01.png)
 
 ## Goals
  - Create a clean, well-commented C++ reference emulator for cycle-accurate emulation of the IBM PC/XT.
@@ -64,9 +66,8 @@ What it is currently lacking:
  - Game Port
 
 ## Known issues
-  
- - Keyboard jankiness 
- - Slowdowns in 8088MPH and Area 5150 under heavy IO activity
+
+ - Some glitches in Area 5150
  - Microsoft Flight Simulator 1.0 fails to load
 
 # Thanks to

@@ -4,11 +4,13 @@
       <w>autoinitialization</w>
       <w>balsom</w>
       <w>crtc</w>
+      <w>dequeueing</w>
       <w>disasm</w>
       <w>dmac</w>
       <w>hchar</w>
       <w>microcoded</w>
       <w>mooheader</w>
+      <w>repne</w>
       <w>strobed</w>
       <w>vram</w>
       <w>xtce</w>

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/sdl3-sample.iml" filepath="$PROJECT_DIR$/.idea/sdl3-sample.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/xtce-blue.iml" filepath="$PROJECT_DIR$/.idea/xtce-blue.iml" />
     </modules>
   </component>
 </project>

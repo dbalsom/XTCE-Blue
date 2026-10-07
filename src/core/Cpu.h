@@ -1,33 +1,36 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Andrew Jenner
+// Copyright (C) 2026 Daniel Balsom
 #ifndef CPU_H
 #define CPU_H
 
-#include <iostream>
-#include <iomanip>
-#include <string>
-#include <format>
 #include <SDL3/SDL_log.h>
 #include <deque>
+#include <format>
+#include <iomanip>
+#include <iostream>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <sstream>
 
 #include "../xtce_blue.h"
 #include "Bus.h"
 #include "SnifferDecoder.h"
 
-#include "microcode.h"
 #include "cpu_types.h"
+#include "microcode.h"
 
 #define LINE_ENDING_SIZE 1
-#define DEBUG_MC 1
+#define DEBUG_MC 0
 
 template <typename BusType = Bus, typename WordT = uint8_t, std::size_t QueueLen = 4>
 class Cpu
 {
 
     static constexpr int OFF_RAILS_CT = 20;
-    static_assert(
-        std::is_same<WordT, uint8_t>::value ||
-        std::is_same<WordT, uint16_t>::value,
-        "Cpu WordT must be uint8_t or uint16_t"
-        );
+    static_assert(std::is_same_v<WordT, uint8_t> || std::is_same_v<WordT, uint16_t>,
+                  "Cpu WordT must be uint8_t or uint16_t");
     static_assert(QueueLen > 0, "QueueLen must be > 0");
 
     enum GroupDecodeFlags
@@ -64,7 +67,13 @@ class Cpu
     };
 
 public:
-    enum class RunResult { Ok, Halt, BreakpointHit, OffRails };
+    enum class RunResult
+    {
+        Ok,
+        Halt,
+        BreakpointHit,
+        OffRails
+    };
 
     enum MicrocodeState
     {
@@ -100,27 +109,24 @@ public:
     };
 
     // Default constructor: default-construct the bus and initialize CPU state
-    Cpu() :
-        _consoleLogging(false), _bus() {
-        initializeCommon();
-    }
+    Cpu() : _consoleLogging(false), _bus() { initializeCommon(); }
 
     // Forwarding constructor: allow callers to construct CpuT with arguments forwarded to BusType's constructor.
     template <typename... Args>
-    explicit Cpu(Args&&... args) :
-        _consoleLogging(false), _bus(std::forward<Args>(args)...) {
+    explicit Cpu(Args&&... args) : _consoleLogging(false), _bus(std::forward<Args>(args)...) {
         initializeCommon();
     }
 
     MicrocodeState getMCState() const { return _state; }
     BusType* getBus() { return &_bus; }
-    uint8_t getALU() const { return _alu; }
+    [[nodiscard]] uint8_t getALU() const { return _alu; }
     uint8_t* getRAM() { return _bus.ram(); }
     uint16_t* getMainRegisters() { return &_registers[24]; }
     uint16_t* getRegisters() { return &_registers[0]; }
     void stubInit() { _bus.stubInit(); }
 
-    void setExtents(int logStartCycle, int logEndCycle, int executeEndCycle, int stopIP, int stopSeg) {
+    void setExtents(const int logStartCycle, const int logEndCycle, const int executeEndCycle, const int stopIP,
+                    const int stopSeg) {
         _logStartCycle = logStartCycle + 4;
         _logEndCycle = logEndCycle;
         _executeEndCycle = executeEndCycle;
@@ -128,9 +134,7 @@ public:
         _stopSeg = stopSeg;
     }
 
-    void setLogInstructions(const bool state) {
-        _log_instructions = state;
-    }
+    void setLogInstructions(const bool state) { _log_instructions = state; }
 
     bool isLogInstructions() const { return _log_instructions; }
 
@@ -139,18 +143,39 @@ public:
         _bad_opcode_ct = badOpcodeCt;
     }
 
-    std::vector<InstructionHistoryEntry> getHistory(size_t lines) {
-        return _history.getLast(lines);
-    }
+    std::vector<InstructionHistoryEntry> getHistory(size_t lines) { return _history.getLast(lines); }
 
-    uint16_t getInstructionPointer() const {
-        return _inst_address;
-    }
+    [[nodiscard]] uint16_t getInstructionPointer() const { return _inst_address; }
 
     void setInitialIP(const int v) { pc() = v; }
-    uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
+    [[nodiscard]] uint64_t cycle() const { return _cycle >= 11 ? _cycle - 11 : 0; }
+    [[nodiscard]] uint64_t instructionCount() const { return instruction_count_; }
+    [[nodiscard]] QueueReadState getQueueStatus() const { return queue_status_; }
 
-    std::string log() const {
+    void setBusCycleCapture(bool enabled) { capture_bus_cycles_ = enabled; }
+    [[nodiscard]] const CpuBusCycle& getBusCycle() const { return bus_cycle_; }
+
+    // Call after reset and setting CS:IP, before execution. PC is the BIU's
+    // fetch pointer, so advance it past the bytes already present in the queue.
+    void setPrefetchQueue(std::span<const uint8_t> bytes) {
+        static_assert(sizeof(WordT) == 1, "Byte queue initialization is for the 8088");
+        if (bytes.size() > QueueLen) {
+            throw std::invalid_argument("Initial prefetch queue exceeds CPU capacity");
+        }
+        _queue = 0;
+        _queueBytes = 0;
+        _newQueue.clear();
+        _dequeueing = false;
+        for (const auto byte : bytes) {
+            _newQueue.push_word(byte, pc());
+            _queue |= static_cast<uint32_t>(byte) << (_queueBytes * 8);
+            ++_queueBytes;
+            ++pc();
+        }
+        _queueFilled = bytes.size() == QueueLen;
+    }
+
+    [[nodiscard]] std::string log() const {
         // Assemble buffered lines into a single string on request
         std::string out;
         for (const auto& s : _logBuffer) {
@@ -182,6 +207,7 @@ public:
         _alu = 0;
         _aluInput = 0;
         _queueBytes = 0;
+        _queueFilled = false;
         _queue = 0;
         _newQueue = {};
         _segmentOverride = -1;
@@ -199,6 +225,7 @@ public:
         _queueFlushing = false;
         _lastIOType = ioPassive;
         _t5 = false;
+        _t6 = false;
         _interruptPending = false;
         _ready = true;
         //_cyclesUntilCanLowerQueueFilled = 0;
@@ -216,7 +243,17 @@ public:
         _overflow = false;
 
         // Instruction tracking
+        _rni = false;
+        _nx = false;
+        _in_instruction = false;
+        _state = stateRunning;
+        queue_status_ = QueueReadState::NoOperation;
+        next_queue_status_ = QueueReadState::NoOperation;
+        next_queue_byte_ = 0;
+        bus_cycle_ = {};
+        bus_segment_status_ = 4;
         _inst_address = 0;
+        instruction_count_ = 0;
         _history.clear();
 
         _bad_opcode_ct = 0;
@@ -266,9 +303,7 @@ public:
         while ((getRealIP() != _stopIP + 2 || cs() != _stopSeg) && _cycle < _executeEndCycle);
     }
 
-    void setConsoleLogging() {
-        _consoleLogging = true;
-    }
+    void setConsoleLogging() { _consoleLogging = true; }
 
     // Run CPU cycles until the next instruction boundary is reached.
     // Returns the number of CPU cycles executed.
@@ -292,21 +327,13 @@ public:
         return cycles;
     }
 
-    void setRegister(const Register r, const uint16_t v) {
-        _registers[reg_to_idx(r)] = v;
-    }
+    void setRegister(const Register r, const uint16_t v) { _registers[reg_to_idx(r)] = v; }
 
-    uint16_t getRegister(const Register r) const {
-        return _registers[reg_to_idx(r)];
-    }
+    uint16_t getRegister(const Register r) const { return _registers[reg_to_idx(r)]; }
 
-    uint16_t getRealIP() {
-        return pc() - _queueBytes;
-    }
+    uint16_t getRealIP() { return pc() - _queueBytes; }
 
-    void setTestNumber(uint32_t n) {
-        _testNumber = n;
-    }
+    void setTestNumber(uint32_t n) { _testNumber = n; }
 
     // Breakpoint API
     void setBreakpoint(const uint16_t cs, const uint16_t ip) {
@@ -326,6 +353,14 @@ public:
     uint16_t breakpointCS() const { return _breakpoint_cs; }
     uint16_t breakpointIP() const { return _breakpoint_ip; }
     void clearBreakpointHit() { _breakpointHit = false; }
+
+    // Stop when INT imm8 consumes its vector, before entering the handler.
+    void setSoftwareInterruptBreakpoint(const uint8_t vector) {
+        software_interrupt_breakpoint_ = vector;
+        _breakpointHit = false;
+    }
+
+    void clearSoftwareInterruptBreakpoint() { software_interrupt_breakpoint_ = -1; }
 
 private:
     enum IOType
@@ -353,7 +388,6 @@ private:
             // if required.
             _byteRegisters[i] = &byteData[byteNumbers[i] ^ bigEndian];
         }
-
     }
 
     // Extracted common initialization logic so we can reuse it in all constructors.
@@ -366,12 +400,14 @@ private:
         _registers[21] = 0xffff;
         _registers[23] = 0;
 
-        std::cout << "CPU initializing." << std::endl;
+        // std::cout << "CPU initializing." << std::endl;
 
         // Initialize the microcode data and put it in a format more suitable for interpreting
 
         // Select 8086 based on template WordT parameter.
-        static const bool use8086 = std::is_same<WordT, uint16_t>::value;
+        static constexpr bool use8086 = std::is_same_v<WordT, uint16_t>;
+        const std::string_view microcodeRomLeft = use8086 ? MICROCODE_ROM_LEFT_8086 : MICROCODE_ROM_LEFT_8088;
+        const std::string_view microcodeRomRight = use8086 ? MICROCODE_ROM_RIGHT_8086 : MICROCODE_ROM_RIGHT_8088;
 
         // Initialize an array to hold the 512 21-bit microcode instruction words.
         uint32_t instructions[512];
@@ -384,9 +420,7 @@ private:
         for (int y = 0; y < 84; ++y) {
             // Iterate through left and right columns.
             for (int half = 0; half < 2; ++half) {
-                std::string filename = (half == 1 ? "l" : "r");
-                filename += (use8086 ? "a" : "");
-                std::string_view s = get_file(filename);
+                const std::string_view s = half == 1 ? microcodeRomLeft : microcodeRomRight;
                 // Iterate through the width of the ROM block (64).
                 for (int x = 0; x < 64; ++x) {
                     int b = s[y * (64 + LINE_ENDING_SIZE) + (63 - x)] == '0' ? 1 : 0;
@@ -446,37 +480,23 @@ private:
         // To implement efficient microcode lookups, we expand the PLA data into a full 11-bit (2048-entry) lookup
         // table, _microcodeIndex. This LUT is by nature sparse, but we shouldn't ever attempt to access a non-mapped
         // entry during normal operation.
-        int stage1[128];
-        for (int x = 0; x < 128; ++x) {
-            stage1[x] = 0;
-        }
-        for (int g = 0; g < 9; ++g) {
-            // Width of each ROM file is 16, except for groups 0 and 8 which are 8.
-            int n = 16;
-            if (g == 0 || g == 8) {
-                n = 8;
-            }
+        int stage1[128]{};
 
-            // This array provides the X bit position offset for each group.
-            int xx[9] = {0, 8, 24, 40, 56, 72, 88, 104, 120};
-            int xp = xx[g];
-
-            // Iterate through top and bottom halves of each ROM file.
-            for (int h = 0; h < 2; ++h) {
-                std::string filename = decimal(g) + (h == 0 ? "t" : "b") + ".txt";
+        // The top and bottom decoder images combine the former nine horizontal fragments into full-width rows.
+        for (int h = 0; h < 2; ++h) {
+            constexpr int decoderHeight = 11;
 #if DEBUG_MC
-                std::cout << "Loading microcode file: " << filename << std::endl;
+            std::cout << "Loading " << (h == 0 ? "top" : "bottom") << " microcode decoder" << std::endl;
 #endif
-                std::string_view s = get_file(filename);
+            const std::string_view decoder = h == 0 ? MICROCODE_DECODER_TOP : MICROCODE_DECODER_BOTTOM;
 
-                // Iterate through the height of each ROM file (11 rows).
-                for (int y = 0; y < 11; ++y) {
-                    for (int x = 0; x < n; ++x) {
-                        int b = s[y * (n + LINE_ENDING_SIZE) + x] == '0' ? 1 : 0;
-                        if (b != 0) {
-                            // Stage1 is written in reverse-order.
-                            stage1[127 - (x + xp)] |= 1 << (y * 2 + (h ^ (y <= 2 ? 1 : 0)));
-                        }
+            for (int y = 0; y < decoderHeight; ++y) {
+                constexpr int decoderWidth = 128;
+                for (int x = 0; x < decoderWidth; ++x) {
+                    const bool programmed = decoder[y * (decoderWidth + LINE_ENDING_SIZE) + x] == '0';
+                    if (programmed) {
+                        // Stage1 is written in reverse-order.
+                        stage1[decoderWidth - 1 - x] |= 1 << (y * 2 + (h ^ (y <= 2 ? 1 : 0)));
                     }
                 }
             }
@@ -520,11 +540,10 @@ private:
         // The inputs vary depending on the type of lookup.
         // For looking up an EA calculation microcode address, the inputs are 5 bits from the ModRM byte.
 
-        std::string translationFile = use8086 ? "translation_8086.txt" : "translation_8088.txt";
 #if DEBUG_MC
-        std::cout << "Loading translation ROM: " << translationFile << std::endl;
+        std::cout << "Loading " << (use8086 ? "8086" : "8088") << " translation ROM" << std::endl;
 #endif
-        std::string_view translationString = get_file(translationFile);
+        const std::string_view translationString = use8086 ? MICROCODE_TRANSLATION_8086 : MICROCODE_TRANSLATION_8088;
         int tsp = 0;
         char c = translationString[0];
 
@@ -585,7 +604,7 @@ private:
 
         int groupInput[38 * 18];
         int groupOutput[38 * 15];
-        std::string_view groupString = get_file("group.txt");
+        constexpr std::string_view groupString = MICROCODE_GROUP_DECODER;
 
         // Iterate through each column of the group decode ROM.
         for (int x = 0; x < 38; ++x) {
@@ -689,6 +708,8 @@ private:
         }
         assert(q1 == q2);
         _dequeueing = true;
+        next_queue_status_ = qs;
+        next_queue_byte_ = q1;
         _snifferDecoder.queueOperation(qs);
         return q1;
     }
@@ -813,6 +834,11 @@ private:
         }
         _opcode = new_opcode;
         _group = _nextGroup;
+        // Count instruction starts, excluding prefixes and interrupt-entry microcode.
+        // REP iterations execute within one instruction and do not increment this.
+        if (new_opcode < 0x100 && (_group & groupNonPrefix) != 0) {
+            ++instruction_count_;
+        }
     }
 
     void readFlags() {
@@ -853,9 +879,6 @@ private:
         if ((_group & groupByteOrWordAccess) == 0) {
             _wordSize = false; // Just for XLAT
         }
-        if (_testNumber == 77) {
-            std::cout << "Foo";
-        }
         readFlags();
         // Default is ADD tmpa (12) (assumed in EA calculations)
         _alu = 0;
@@ -874,8 +897,7 @@ private:
             // EALOAD and EADONE finish with RTN
             _modRM = _nextModRM;
             if ((_group & groupMicrocodePointerFromOpcode) == 0) {
-                _microcodePointer = ((_modRM << 1) & 0x70) | 0xf00 |
-                    ((_opcode & 1) << 12) | ((_opcode & 8) << 4);
+                _microcodePointer = ((_modRM << 1) & 0x70) | 0xf00 | ((_opcode & 1) << 12) | ((_opcode & 8) << 4);
                 _state = stateSingleCycleWait;
             }
             // Check that RM != 11 (which would indicate a register-only operation)
@@ -930,8 +952,7 @@ private:
             _nx = false;
             _state = stateHaltingStart;
             _extraHaltDelay =
-                !((_busState == tIdle && !_t5 && !_t6 && _ioType == ioPassive)
-                    || (_t5 && _lastIOType != ioPrefetch));
+                !((_busState == tIdle && !_t5 && !_t6 && _ioType == ioPassive) || (_t5 && _lastIOType != ioPrefetch));
             return;
         }
         if ((_group & groupCMC) != 0) {
@@ -958,7 +979,6 @@ private:
             }
             return;
         }
-
     }
 
     uint16_t doRotate(uint16_t v, uint16_t a, bool carry) {
@@ -989,7 +1009,8 @@ private:
 
     uint16_t doALU() {
         uint16_t t;
-        uint32_t a = _registers[_aluInput + 12], v;
+        const uint32_t a = _registers[_aluInput + 12];
+        uint32_t v = 0;
         switch (_alu) {
             case 0x00: // ADD
             case 0x02: // ADC
@@ -1005,18 +1026,10 @@ private:
             case 0x06: // XOR
                 return bitwise(a ^ tmpb());
             case 0x08: // ROL
-                if (_testNumber == 77) {
-                    std::cout << "Foo";
-                }
                 return doRotate((a << 1) | (topBit(a) ? 1 : 0), a, topBit(a));
             case 0x09: // ROR
                 return doRotate(((a & wordMask()) >> 1) | topBit(lowBit(a)), a, lowBit(a));
             case 0x0a: // LRCY
-
-                if (a == 0xAD61) {
-                    // break here
-                    //std::cout << " have 0xAD61\n";
-                }
                 return doRotate((a << 1) | (_carry ? 1 : 0), a, topBit(a));
             case 0x0b: // RRCY
                 return doRotate(((a & wordMask()) >> 1) | topBit(_carry), a, lowBit(a));
@@ -1029,62 +1042,30 @@ private:
             case 0x0f: // SAR
                 return doShift(((a & wordMask()) >> 1) | topBit(topBit(a)), a, lowBit(a), false);
             case 0x10: // PASS
-                //return doShift(a, a, false, false);
+                // return doShift(a, a, false, false);
                 return doPass(a);
             case 0x14: // DAA
-            {
-                const bool old_af = _auxiliary;
-                const bool old_cf = _carry;
-                t = a;
-                auto adj = 0;
+                {
+                    const auto al = static_cast<uint8_t>(a);
+                    const bool low_gt9 = (al & 0x0f) > 9;
 
-                // Extremely funky undefined OF behavior (from MartyPC)
-                _overflow = (a <= 0x7f) && ((!old_cf && a >= 0x7A) || (old_cf && a >= 0x1A));
+                    // Calculate CF before modifying AF.
+                    _carry = _carry || (al >> 4) > 9 || ((al >> 4) == 9 && low_gt9 && !_auxiliary);
+                    _auxiliary = _auxiliary || low_gt9;
 
-                if (old_af || (a & 0x0f) > 9) {
-                    adj = 6;
-                    t = a + adj;
-                    //_overflow = topBit(t & (t ^ a));
-                    _auxiliary = true;
+                    v = (al + (_auxiliary ? 0x06 : 0) + (_carry ? 0x60 : 0)) & 0xff;
+                    _overflow = (al & 0x80) == 0 && (v & 0x80) != 0;
+                    doPZS(v);
+                    break;
                 }
-                if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                    adj = 0x60;
-                    v = t + adj;
-                    //_overflow = topBit(v & (v ^ t));
-                    _carry = true;
-                }
-                else {
-                    v = t;
-                }
-                //_overflow = (a ^ v) & (adj ^ v) & 0x80 != 0;
-                doPZS(v);
-                break;
-            }
             case 0x15: // DAS
-            {
-                bool old_af = _auxiliary;
-                t = a;
-                auto adj = 0;
-                if (old_af || (a & 0x0f) > 9) {
-                    t = a - 6;
-                    adj = 6;
-                    //_overflow = topBit(a & (t ^ a));
-                    _auxiliary = true;
-                }
-                if (_carry || a > (old_af ? 0x9fU : 0x99U)) {
-                    v = t - 0x60;
-                    adj = 0x60;
-                    //_overflow = topBit(t & (v ^ t));
-                    _carry = true;
-                }
-                else {
-                    v = t;
-                }
-                // More undefined overflow flag fun!
-                _overflow = ((a ^ adj) & (a ^ v) & 0x80) != 0;
+                _carry = _carry || a > (_auxiliary ? 0x9fU : 0x99U);
+                _auxiliary = _auxiliary || (a & 0x0f) > 9;
+
+                v = a - (_auxiliary ? 0x06 : 0) - (_carry ? 0x60 : 0);
+                _overflow = (a & ~v & 0x80) != 0;
                 doPZS(v);
                 break;
-            }
             case 0x16: // AAA
                 _carry = (_auxiliary || (a & 0xf) > 9);
                 _auxiliary = _carry;
@@ -1121,29 +1102,33 @@ private:
                 return a + 2; // flags never updated
             case 0x1d: // DEC2
                 return a - 2; // flags never updated
+            default:
+                break;
         }
         return v;
     }
 
     void updateFlags() {
-        flags() = (flags() & 0xf702)
-            | (_overflow ? 0x800 : 0)
-            | (_sign ? 0x80 : 0)
-            | (_zero ? 0x40 : 0)
-            | (_auxiliary ? 0x10 : 0)
-            | _parity // Already shifted
+        flags() = (flags() & 0xf702) | (_overflow ? 0x800 : 0) | (_sign ? 0x80 : 0) | (_zero ? 0x40 : 0) |
+            (_auxiliary ? 0x10 : 0) | _parity // Already shifted
             | (_carry ? 1 : 0);
     }
 
     uint32_t readSource() {
         uint32_t v;
         switch (_source) {
-            case 7: // Q
-                if (_queueBytes == 0) {
-                    _state = stateWaitingForQueueData;
-                    return 0;
+            case 7:
+                { // Q
+                    if (_queueBytes == 0) {
+                        _state = stateWaitingForQueueData;
+                        return 0;
+                    }
+                    const uint8_t data = queueRead(QueueReadState::SubsequentByte);
+                    if (_opcode == 0xcd && data == software_interrupt_breakpoint_) {
+                        _breakpointHit = true;
+                    }
+                    return data;
                 }
-                return queueRead(QueueReadState::SubsequentByte);
             case 8: // A (AL)
             case 9: // C (CL)? - not used
             case 10: // E (DL)? - not used
@@ -1177,11 +1162,13 @@ private:
             case 22: // CR
                 _wordSize = true; // HACK: not sure how this happens for INT0 on the hardware
                 return _microcodePointer & 0xf;
+            default:
+                break;
         }
         return _registers[_source];
     }
 
-    void writeDestination(uint32_t v) {
+    void writeDestination(const uint32_t v) {
         switch (_destination) {
             case 8: // A (AL)
             case 9: // C (CL)? - not used
@@ -1260,7 +1247,6 @@ private:
                 else {
                     std::cerr << "Unknown destination: " << _destination << std::endl;
                 }
-
         }
     }
 
@@ -1313,7 +1299,7 @@ private:
                 break;
             case 4: // RTN
                 // Normal RTN updates carry?
-                //std::cout << "Setting carry to " << _carry << std::endl;
+                // std::cout << "Setting carry to " << _carry << std::endl;
                 setCF(_carry);
 
                 _microcodePointer = _microcodeReturn;
@@ -1343,8 +1329,7 @@ private:
             case 0: // short jump
                 if (!condition(_operands >> 4))
                     break;
-                _microcodePointer =
-                    (_microcodePointer & 0x1ff0) + (_operands & 0xf);
+                _microcodePointer = (_microcodePointer & 0x1ff0) + (_operands & 0xf);
                 _state = stateSingleCycleWait;
                 break;
             case 1: // precondition ALU
@@ -1359,8 +1344,7 @@ private:
                 if (_alu == 0x11) {
                     // XI
                     readFlags();
-                    _alu = ((((_opcode & 0x80) != 0 ? _modRM : _opcode) >> 3) & 7) |
-                        ((_opcode >> 3) & 8) |
+                    _alu = ((((_opcode & 0x80) != 0 ? _modRM : _opcode) >> 3) & 7) | ((_opcode >> 3) & 8) |
                         ((_group & groupAddSubBooleanRotate) != 0 ? 0 : 0x10);
                 }
                 break;
@@ -1373,6 +1357,7 @@ private:
                         _queueBytes = 0;
                         _queue = 0;
                         _newQueue.clear();
+                        next_queue_status_ = QueueReadState::Flush;
                         _snifferDecoder.queueOperation(QueueReadState::Flush);
                         _queueFlushing = true;
                         break;
@@ -1400,6 +1385,8 @@ private:
                     case 8: // WAIT
                         // Don't know what this does!
                         break;
+                    default:
+                        break;
                 }
                 doSecondMisc();
                 break;
@@ -1408,35 +1395,33 @@ private:
                 break;
             case 5: // long jump or call
             case 7:
-            {
-                int mc_ptr =
-                (((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                    (_microcodePointer & 3)) << 2) >> 2;
+                {
+                    const int mc_ptr =
+                        (((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2) >> 2;
 
-                if (mc_ptr == 0x1c5) {
-                    std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
-                }
+                    // if (mc_ptr == 0x1c5) {
+                    //     std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
+                    // }
 
-                if (!condition(_operands >> 4)) {
+                    if (!condition(_operands >> 4)) {
+                        break;
+                    }
+                    _skipRNI = false;
+                    if (_type == 7) {
+                        _microcodeReturn = _microcodePointer;
+                    }
+                    _microcodePointer =
+                        _translation[((_type & 2) << 6) + ((_operands << 3) & 0x78) +
+                                     ((_group & groupInitialEARead) == 0 ? 4 : 0) + ((_modRM & 0xc0) == 0 ? 1 : 0)] >>
+                        1;
+
+                    // int mc_ptr_dst =
+                    // (((_microcodeIndex[_microcodePointer >> 2] << 2) +
+                    //     (_microcodePointer & 3)) << 2) >> 2;
+                    // std::cout << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
+                    _state = stateSingleCycleWait;
                     break;
                 }
-                _skipRNI = false;
-                if (_type == 7) {
-                    _microcodeReturn = _microcodePointer;
-                }
-                _microcodePointer = _translation[
-                    ((_type & 2) << 6) +
-                    ((_operands << 3) & 0x78) +
-                    ((_group & groupInitialEARead) == 0 ? 4 : 0) +
-                    ((_modRM & 0xc0) == 0 ? 1 : 0)] >> 1;
-
-                // int mc_ptr_dst =
-                // (((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                //     (_microcodePointer & 3)) << 2) >> 2;
-                //std::cout << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
-                _state = stateSingleCycleWait;
-                break;
-            }
             default:
                 break;
         }
@@ -1474,9 +1459,7 @@ private:
         switch (_state) {
             case stateRunning:
                 _lastMicrocodePointer = _microcodePointer;
-                m = &_microcode[
-                    ((_microcodeIndex[_microcodePointer >> 2] << 2) +
-                        (_microcodePointer & 3)) << 2];
+                m = &_microcode[((_microcodeIndex[_microcodePointer >> 2] << 2) + (_microcodePointer & 3)) << 2];
                 advanceMicrocodePointer();
                 _destination = m[0];
                 _source = m[1];
@@ -1540,33 +1523,33 @@ private:
                 break;
 
             case stateWaitingUntilFirstByteCanStart:
-            {
-                if (_ioType != ioPassive) {
-                    // Bus is busy
+                {
+                    if (_ioType != ioPassive) {
+                        // Bus is busy
+                        break;
+                    }
+                    _ioWriteData = opr() & 0xff;
+                    _ioSegment = (_operands >> 2) & 3;
+                    auto base_segment = ((_group & groupEffectiveAddress) != 0) ? _segment : _ioSegment;
+                    if (_ioSegment == 3) {
+                        // If segment is DS, use the segment override if present
+                        _ioSegment = (_segmentOverride != -1) ? _segmentOverride : base_segment;
+                    }
+                    else {
+                        // This is a no-segment access (IVT read or I/O).
+                        // We use register slot 9 because it's a register slot that stays as all-zero bits, and has the
+                        // same low two bits (so that the logs show the right segment).
+                        if (_ioSegment == 1) {
+                            _ioSegment = 9;
+                        }
+                    }
+                    _ioIndex = ind();
+                    _ioAddress = physicalAddress(_ioSegment, _ioIndex);
+
+                    _state = stateWaitingUntilFirstByteDone;
+                    busStart();
                     break;
                 }
-                _ioWriteData = opr() & 0xff;
-                _ioSegment = (_operands >> 2) & 3;
-                auto base_segment = ((_group & groupEffectiveAddress) != 0) ? _segment : _ioSegment;
-                if (_ioSegment == 3) {
-                    // If segment is DS, use the segment override if present
-                    _ioSegment = (_segmentOverride != -1) ? _segmentOverride : base_segment;
-                }
-                else {
-                    // This is a no-segment access (IVT read or I/O).
-                    // We use register slot 9 because it's a register slot that stays as all-zero bits, and has the
-                    // same low two bits (so that the logs show the right segment).
-                    if (_ioSegment == 1) {
-                        _ioSegment = 9;
-                    }
-                }
-                _ioIndex = ind();
-                _ioAddress = physicalAddress(_ioSegment, _ioIndex);
-
-                _state = stateWaitingUntilFirstByteDone;
-                busStart();
-                break;
-            }
             case stateWaitingUntilFirstByteDone:
                 if (!_wordSize) {
                     // 8-bit access, disable BIU request flag as we will complete this bus cycle.
@@ -1584,7 +1567,7 @@ private:
                     // 8-bit access - all done this state.
                     // When reading from the bus, the high byte is set to 0xFF on byte access.
 
-                    //busAccessDone(0xFF);
+                    // busAccessDone(0xFF);
                     busAccessDone(0x00);
                 }
                 else {
@@ -1746,6 +1729,10 @@ private:
 
     // Execute one CPU cycle.
     void simulateCycle() {
+        // QS pins report the queue operation performed during the previous cycle.
+        queue_status_ = next_queue_status_;
+        const auto queue_byte = next_queue_byte_;
+        next_queue_status_ = QueueReadState::NoOperation;
         BusState nextState = _busState;
         const bool write = _ioType == ioWriteMemory || _ioType == ioWritePort;
         _t6 = _t5;
@@ -1761,6 +1748,9 @@ private:
                 break;
             case t2:
                 _snifferDecoder.setStatusHigh(_ioSegment);
+                // The EU can prepare another transfer before this one's T4.
+                // S4:S3 retain the segment latched on this transfer's T2.
+                bus_segment_status_ = _ioSegment == 0 ? 0 : _ioSegment == 2 ? 1 : _ioSegment == 3 ? 3 : 2;
                 _snifferDecoder.setBusOperation(static_cast<int>(_ioType));
                 if (write) {
                     _snifferDecoder.setData(_ioWriteData);
@@ -1792,13 +1782,59 @@ private:
                 _t4 = true;
                 break;
         }
+
+        if (capture_bus_cycles_) {
+            // Capture a CPU cycle snapshot for SST validation
+            bus_cycle_ = {};
+            static constexpr CpuBusCycle::Phase phases[] = {CpuBusCycle::Phase::T1, CpuBusCycle::Phase::T2,
+                                                            CpuBusCycle::Phase::T3, CpuBusCycle::Phase::Wait,
+                                                            CpuBusCycle::Phase::T4, CpuBusCycle::Phase::Idle};
+            bus_cycle_.phase = phases[_busState];
+            bus_cycle_.ale = _busState == t1;
+
+            if (_busState != tIdle) {
+                bus_cycle_.address = _ioAddress & 0xfffff;
+            }
+
+            bus_cycle_.bus_status =
+                (_busState == t1 || _busState == t2 || ((_busState == t3 || _busState == tWait) && !_ready))
+                ? _ioType
+                : ioPassive;
+
+            if (_busState != t1 && _busState != tIdle) {
+                bus_cycle_.segment_status = bus_segment_status_;
+            }
+
+            const bool data_phase = _busState == t3 || _busState == tWait;
+            const auto transfer = data_phase && _ready ? _lastIOType : _ioType;
+
+            if (_busState == t2 || data_phase) {
+                const uint8_t strobes = write ? (_busState == t2 ? 2 : 3) : 4;
+
+                if (transfer == ioPrefetch || transfer == ioReadMemory || transfer == ioWriteMemory) {
+                    bus_cycle_.memory_status = strobes;
+                }
+                else if (transfer == ioReadPort || transfer == ioWritePort) {
+                    bus_cycle_.io_status = strobes;
+                }
+
+                bus_cycle_.data_valid = data_phase && _ready;
+                if (bus_cycle_.data_valid) {
+                    bus_cycle_.data = _ioReadData;
+                }
+            }
+
+            bus_cycle_.queue_status = queue_status_;
+            bus_cycle_.queue_byte = queue_byte;
+        }
+
         if (_dequeueing) {
             _dequeueing = false;
             _queue >>= 8;
             --_queueBytes;
             // Don't need to adjust newQueue here as we did that when popping.
         }
-        //if (_cyclesUntilCanLowerQueueFilled == 0 || (_cyclesUntilCanLowerQueueFilled == 1 && _queueBytes < 3)) {
+        // if (_cyclesUntilCanLowerQueueFilled == 0 || (_cyclesUntilCanLowerQueueFilled == 1 && _queueBytes < 3)) {
         //_cyclesUntilCanLowerQueueFilled = 0;
         if ((_queueBytes < 3 || (_busState == tIdle && (_lastIOType != ioPrefetch || (!_t4 && !_t5))))) {
             if (_busState == tIdle && !(_t4 && _lastIOType == ioPrefetch) && _queueBytes < 4) {
@@ -1806,7 +1842,7 @@ private:
             }
         }
         //}
-        //else
+        // else
         //    --_cyclesUntilCanLowerQueueFilled;
 
         // We can execute microcode in loader states 2 & 3.
@@ -1958,17 +1994,13 @@ private:
             "RC", // CS
             "RS", // SS - presumably, to fit pattern. Only used in RESET
             "RD", // DS
-            "PC",
-            "IND",
-            "OPR",
+            "PC",      "IND",  "OPR",
             "no dest", // as dest only - source is Q
             "A", // AL
             "C", // CL? - not used
             "E", // DL? - not used
             "L", // BL? - not used
-            "tmpa",
-            "tmpb",
-            "tmpc",
+            "tmpa",    "tmpb", "tmpc",
             "F", // flags register
             "X", // AH
             "B", // CH? - not used
@@ -1995,13 +2027,10 @@ private:
             "NCZ ",
             "TEST", // jump if overflow flag is set
             "OF  ", // jump if -TEST pin not asserted
-            "CY  ",
-            "UNC ",
-            "NF1 ",
+            "CY  ", "UNC ", "NF1 ",
             "NZ  ", // jump if not zero (used in JCXZ and LOOP)
             "X0  ", // jump if bit 3 of opcode is 1
-            "NCY ",
-            "F1  ",
+            "NCY ", "F1  ",
             "INT ", // jump if interrupt is pending
             "XC  ", // jump if condition based on low 4 bits of opcode
         };
@@ -2030,9 +2059,7 @@ private:
             "POSTIDIV", // negate ~tmpc if F1 set
         };
 
-        int mcIndex =
-        ((_microcodeIndex[_lastMicrocodePointer >> 2] << 2) +
-            (_lastMicrocodePointer & 3)) << 2;
+        int mcIndex = ((_microcodeIndex[_lastMicrocodePointer >> 2] << 2) + (_lastMicrocodePointer & 3)) << 2;
         int mcLineNumber = mcIndex >> 2;
         uint8_t* m = &_microcode[mcIndex];
         int d = m[0];
@@ -2068,7 +2095,8 @@ private:
                 case 0x16:
                     source = "CR";
                     break;
-                // low 3 bits of microcode address Counting Register + 1? Used as interrupt number at 0x198 (1), 0x199 (2), 0x1a7 (0), 0x1af (4), and 0x1b2 (3)
+                // low 3 bits of microcode address Counting Register + 1? Used as interrupt number at 0x198 (1), 0x199
+                // (2), 0x1a7 (0), 0x1af (4), and 0x1b2 (3)
                 case 0x17:
                     source = "ZERO";
                     break;
@@ -2392,30 +2420,20 @@ private:
         return jump;
     }
 
-    bool interruptPending() {
-        return _nmiRequested || (intf() && _interruptPending);
-    }
+    bool interruptPending() { return _nmiRequested || (intf() && _interruptPending); }
 
     uint16_t wordMask() const { return _wordSize ? 0xffff : 0xff; }
 
     void doPZS(const uint16_t v) {
         static uint8_t table[0x100] = {
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
-            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4};
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0,
+            0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4};
         _parity = table[v & 0xff];
         _zero = ((v & wordMask()) == 0);
         _superZero = (v == 0);
@@ -2521,11 +2539,7 @@ private:
     public:
         typedef std::size_t size_type;
 
-        InstructionQueue() :
-            head_(0)
-            , tail_(0)
-            , size_(0) {
-        }
+        InstructionQueue() : head_(0), tail_(0), size_(0) {}
 
         void clear() {
             head_ = 0;
@@ -2533,29 +2547,17 @@ private:
             size_ = 0;
         }
 
-        size_type size() const {
-            return size_;
-        }
+        size_type size() const { return size_; }
 
-        static size_type capacity() {
-            return QueueLen;
-        }
+        static size_type capacity() { return QueueLen; }
 
-        bool isEmpty() const {
-            return size_ == 0;
-        }
+        bool isEmpty() const { return size_ == 0; }
 
-        bool full() const {
-            return size_ == QueueLen;
-        }
+        bool full() const { return size_ == QueueLen; }
 
-        size_type freeSpace() const {
-            return QueueLen - size_;
-        }
+        size_type freeSpace() const { return QueueLen - size_; }
 
-        bool hasRoom() const {
-            return freeSpace() >= sizeof(WordT);
-        }
+        bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
 
         // Push a single entry (byte + address). Returns false if full.
         bool push(uint8_t data, uint16_t address) {
@@ -2605,14 +2607,14 @@ private:
                 return false;
             }
 
-            if (std::is_same<WordT, uint8_t>::value) {
-                uint8_t b = static_cast<uint8_t>(word);
+            if (std::is_same_v<WordT, uint8_t>) {
+                const auto b = static_cast<uint8_t>(word);
                 return push(b, address);
             }
 
-            const uint16_t w = static_cast<uint16_t>(word);
-            const uint8_t lo = static_cast<uint8_t>(w & 0x00FFu);
-            const uint8_t hi = static_cast<uint8_t>((w >> 8) & 0x00FFu);
+            const auto w = static_cast<uint16_t>(word);
+            const auto lo = static_cast<uint8_t>(w & 0x00FFu);
+            const auto hi = static_cast<uint8_t>((w >> 8) & 0x00FFu);
 
             // We already know we have room.
             push(lo, address);
@@ -2620,7 +2622,7 @@ private:
             return true;
         }
 
-        std::string getQueueString() const {
+        [[nodiscard]] std::string getQueueString() const {
             std::ostringstream oss;
 
             // Print each byte from oldest (tail) to newest (head)
@@ -2629,11 +2631,7 @@ private:
                 const uint8_t b = buffer_[index].data;
 
                 // Two-digit upper-case hex
-                oss << std::uppercase
-                    << std::hex
-                    << std::setw(2)
-                    << std::setfill('0')
-                    << static_cast<unsigned>(b);
+                oss << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(b);
 
                 index = (index + 1) % QueueLen;
             }
@@ -2654,19 +2652,18 @@ private:
             return out;
         }
 
-        bool isAtPolicyLen() const {
+        [[nodiscard]] bool isAtPolicyLen() const {
             const size_type sz = size_;
             const size_type cap = QueueLen;
 
-            if (std::is_same<WordT, uint8_t>::value) {
+            if (std::is_same_v<WordT, uint8_t>) {
                 // 8088: queue is "almost full" when it has capacity-1 bytes
                 return (sz == cap - 1);
             }
-            else {
-                // 8086: queue is "almost full" when size is cap-1 or cap-2
-                // (since fetch requires 2-byte room)
-                return (sz == cap - 1) || (sz == cap - 2);
-            }
+
+            // 8086: queue is "almost full" when size is cap-1 or cap-2
+            // (since fetch requires 2-byte room)
+            return (sz == cap - 1) || (sz == cap - 2);
         }
 
         void check(const uint32_t expected) const {
@@ -2708,11 +2705,7 @@ private:
     public:
         typedef std::size_t size_type;
 
-        InstructionHistory() :
-            head_(0)
-            , tail_(0)
-            , size_(0) {
-        }
+        InstructionHistory() : head_(0), tail_(0), size_(0) {}
 
         void clear() {
             head_ = 0;
@@ -2720,29 +2713,17 @@ private:
             size_ = 0;
         }
 
-        size_type len() const {
-            return size_;
-        }
+        [[nodiscard]] size_type len() const { return size_; }
 
-        size_type capacity() {
-            return capacity_;
-        }
+        [[nodiscard]] size_type capacity() const { return capacity_; }
 
-        bool isEmpty() const {
-            return size_ == 0;
-        }
+        [[nodiscard]] bool isEmpty() const { return size_ == 0; }
 
-        bool full() const {
-            return head_ == tail_;
-        }
+        [[nodiscard]] bool full() const { return head_ == tail_; }
 
-        size_type freeSpace() const {
-            return QueueLen - size_;
-        }
+        [[nodiscard]] size_type freeSpace() const { return QueueLen - size_; }
 
-        bool hasRoom() const {
-            return freeSpace() >= sizeof(WordT);
-        }
+        [[nodiscard]] bool hasRoom() const { return freeSpace() >= sizeof(WordT); }
 
         // Push a single entry (byte + address). Returns false if full.
         bool push(InstructionHistoryEntry entry) {
@@ -2828,8 +2809,7 @@ private:
 
     // Advance the microcode pointer to the next instruction. Only the low 4 bits are incremented.
     void advanceMicrocodePointer() {
-        _microcodePointer =
-            (_microcodePointer & 0xFFF0) | ((_microcodePointer + 1) & 0xf);
+        _microcodePointer = (_microcodePointer & 0xFFF0) | ((_microcodePointer + 1) & 0xf);
     }
 
     int _stopIP;
@@ -2891,8 +2871,15 @@ private:
     int _loaderState;
     bool _rni{false}; // Microcode signal to read next instruction
     uint16_t _inst_address{0x0000};
+    uint64_t instruction_count_{0};
     bool _inst_boundary{false};
     bool _in_instruction{false};
+    QueueReadState queue_status_{QueueReadState::NoOperation};
+    QueueReadState next_queue_status_{QueueReadState::NoOperation};
+    uint8_t next_queue_byte_ = 0;
+    bool capture_bus_cycles_ = false;
+    CpuBusCycle bus_cycle_{};
+    uint8_t bus_segment_status_ = 4;
     bool _nx{false}; // Microcode signal to read next instruction early (1-cycle pipeline)
     MicrocodeState _state;
     int _source;
@@ -2920,13 +2907,14 @@ private:
     bool _extraHaltDelay;
     uint32_t _savedAddress;
     bool _ready = true;
-    //int _cyclesUntilCanLowerQueueFilled;
+    // int _cyclesUntilCanLowerQueueFilled;
     bool _locking = false;
     // Breakpoint state
     bool _hasBreakpoint = false;
     bool _breakpointHit = false;
     uint16_t _breakpoint_cs = 0;
     uint16_t _breakpoint_ip = 0;
+    int software_interrupt_breakpoint_ = -1;
     uint32_t _testNumber = 0;
 
     bool _log_instructions = false;

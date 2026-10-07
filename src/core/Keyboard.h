@@ -13,9 +13,7 @@ class Keyboard
     static constexpr uint8_t kResetByte = 0xAA;
 
 public:
-    Keyboard() {
-        reset();
-    }
+    Keyboard() { reset(); }
 
     void setClockLineState(const bool state) {
         std::cout << std::format("Keyboard: Setting clock line state to {}\n", state ? "HIGH" : "LOW");
@@ -56,7 +54,7 @@ public:
     void tick() {
         if (!clock_line_state_) {
             clock_line_low_ticks_++;
-            std::cout << std::format("Keyboard: Clock line low ticks: {}\n", clock_line_low_ticks_);
+            // std::cout << std::format("Keyboard: Clock line low ticks: {}\n", clock_line_low_ticks_);
         }
         else {
             clock_line_high_ticks_++;
@@ -92,4 +90,4 @@ private:
 };
 
 
-#endif //SDL_MIN_KEYBOARD_H
+#endif // SDL_MIN_KEYBOARD_H

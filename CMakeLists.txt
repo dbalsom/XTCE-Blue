@@ -17,7 +17,8 @@ endif()
 
 if(MSVC)
     if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
-        add_definitions(/MP)				# parallelize each target, unless Ninja is the generator
+        add_compile_options(/MP)				# parallelize each target, unless Ninja is the generator
+        add_compile_options(/std:c++latest)
     endif()
 endif()
 
@@ -39,13 +40,15 @@ target_include_directories(${EXECUTABLE_NAME}
 target_sources(${EXECUTABLE_NAME} 
     PRIVATE
         src/main.cpp
+        src/benchmark.cpp
+        src/benchmark.h
         src/core/Machine.cpp
         src/core/Machine.h
         src/xtce_blue.h
         src/core/bios.h
         src/core/font.h
         src/core/Dmac.h
-        src/core/pic.h
+        src/core/Pic.h
         src/core/Pit.h
         src/core/Ppi.h
         src/core/Disassembler.h
@@ -75,12 +78,15 @@ target_sources(${EXECUTABLE_NAME}
         src/gui/DisplayDebugWindow.cpp
         src/gui/InstructionHistoryWindow.h
         src/gui/InstructionHistoryWindow.cpp
-        src/third_party/blip_buffer/blip_buffer.cpp
+        src/third_party/blip_buffer/Blip_Buffer.cpp
         src/frontend/TestRunner.cpp
 )
 
 # Set C++ version
 target_compile_features(${EXECUTABLE_NAME} PUBLIC cxx_std_20)
+
+# Keep Blip's phase table layout consistent in the caller and library.
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE BLIP_PHASE_BITS=8)
 
 # on Web targets, we need CMake to generate a HTML webpage. 
 if(EMSCRIPTEN)
@@ -107,7 +113,7 @@ endmacro()
 add_subdirectory_quiet(SDL EXCLUDE_FROM_ALL)
 
 # Add ImGui
-add_library(imgui
+add_library(imgui STATIC
         imgui/imgui.cpp
         imgui/imgui_draw.cpp
         imgui/imgui_tables.cpp
@@ -116,6 +122,8 @@ add_library(imgui
         imgui/backends/imgui_impl_sdl3.cpp
         imgui/backends/imgui_impl_sdlrenderer3.cpp
 )
+
+target_compile_features(imgui PRIVATE cxx_std_20)
 
 target_include_directories(imgui
         PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}
@@ -127,29 +135,22 @@ target_include_directories(imgui
 # Link ImGui to SDL
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
-# If you don't want SDL_ttf, then remove this section.
-set(SDLTTF_VENDORED ON) # tell SDL_ttf to build its own dependencies
-add_subdirectory_quiet(SDL_ttf EXCLUDE_FROM_ALL)
-
-# SDL_mixer (used for playing audio)
-set(SDLMIXER_MIDI_NATIVE OFF)     # disable formats we don't use to make the build faster and smaller. Also some of these don't work on all platforms so you'll need to do some experimentation.
-set(SDLMIXER_GME OFF)
-set(SDLMIXER_WAVPACK OFF)     
-set(SDLMIXER_MOD OFF)
-set(SDLMIXER_OPUS OFF)
-set(SDLMIXER_VENDORED ON)   # tell SDL_mixer to build its own dependencies
+# Keep SDL_mixer for additional sound sources, with only PCM/WAV support.
+set(SDLMIXER_VENDORED ON)
+set(SDLMIXER_WAVE ON CACHE BOOL "Enable WAVE audio" FORCE)
+foreach(decoder IN ITEMS
+        AIFF AU VOC
+        FLAC_LIBFLAC FLAC_DRFLAC
+        GME MOD_XMP
+        MP3_DRMP3 MP3_MPG123
+        MIDI_FLUIDSYNTH MIDI_TIMIDITY
+        OPUS VORBIS_STB VORBIS_VORBISFILE VORBIS_TREMOR
+        WAVPACK)
+    set(SDLMIXER_${decoder} OFF CACHE BOOL "Unused SDL_mixer decoder" FORCE)
+endforeach()
 add_subdirectory_quiet(SDL_mixer EXCLUDE_FROM_ALL)
 
-# SDL_image (used for loading various image formats)
-set(SDLIMAGE_VENDORED ON)
-set(SDLIMAGE_AVIF OFF)	# disable formats we don't use to make the build faster and smaller.
-set(SDLIMAGE_BMP OFF)
-set(SDLIMAGE_JPEG OFF)
-set(SDLIMAGE_WEBP OFF)
-set(SDLIMAGE_TIF OFF)
-add_subdirectory_quiet(SDL_image EXCLUDE_FROM_ALL)
-
-# Bring in zlib from the SDL_image tree
+# Only zlib is needed from the SDL_image tree, for compressed SST files.
 add_subdirectory_quiet(SDL_image/external/zlib EXCLUDE_FROM_ALL)
 
 # Create a canonical ZLIB::ZLIB alias from whatever target zlib’s CMake defines
@@ -166,58 +167,17 @@ target_compile_definitions(${EXECUTABLE_NAME} PRIVATE MOO_USE_ZLIB)
 # Link SDL to our executable. This also makes its include directory available to us.
 target_link_libraries(${EXECUTABLE_NAME} PUBLIC
     imgui
-	SDL3_ttf::SDL3_ttf      # remove if you are not using SDL_ttf
-	SDL3_mixer::SDL3_mixer  # remove if you are not using SDL_mixer
-	SDL3_image::SDL3_image	# remove if you are not using SDL_image
-    SDL3::SDL3              # If using satellite libraries, SDL must be the last item in the list.
+    SDL3_mixer::SDL3_mixer
+    SDL3::SDL3
     ZLIB::ZLIB
 )
 
 target_compile_definitions(${EXECUTABLE_NAME} PUBLIC SDL_MAIN_USE_CALLBACKS)
 
-# Dealing with assets
-# We have some non-code resources that our application needs in order to work. How we deal with those differs per platform.
-if (APPLE)
-    # on Apple targets, the application bundle has a "resources" subfolder where we can place our assets.
-    # SDL_GetBasePath() gives us easy access to that location.
-    set(input_root "${CMAKE_CURRENT_LIST_DIR}/src")
-    macro(add_resource FILE)
-        file(RELATIVE_PATH relpath "${input_root}" "${FILE}")
-        get_filename_component(relpath "${relpath}" DIRECTORY)
-        target_sources(${EXECUTABLE_NAME} PRIVATE ${FILE})
-        set_property(SOURCE ${FILE} PROPERTY MACOSX_PACKAGE_LOCATION "Resources/${relpath}")
-    endmacro()
-    add_resource("${CMAKE_CURRENT_LIST_DIR}/src/Inter-VariableFont.ttf")
-elseif(EMSCRIPTEN)
-    # on the web, we have to put the files inside of the webassembly
-    # somewhat unintuitively, this is done via a linker argument.
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE 
-        "--preload-file \"${CMAKE_CURRENT_LIST_DIR}/src/Inter-VariableFont.ttf@/\""
-    )
-else()
-    if (ANDROID)
-        file(MAKE_DIRECTORY "${MOBILE_ASSETS_DIR}")    # we need to create the project Assets dir otherwise CMake won't copy our assets.
-    endif()
-
-    macro(copy_helper filename)
-        if (ANDROID)
-            # MOBILE_ASSETS_DIR is set in the gradle file via the cmake command line and points to the Android Studio Assets folder. 
-            # when we copy assets there, the Android build pipeline knows to add them to the apk. 
-            set(outname "${MOBILE_ASSETS_DIR}/${filename}")    
-        else()
-            # for platforms that do not have a good packaging format, all we can do is copy the assets to the process working directory.
-            set(outname "${CMAKE_BINARY_DIR}/$<CONFIGURATION>/${filename}")
-        endif()
-        add_custom_command(POST_BUILD
-            TARGET "${EXECUTABLE_NAME}"
-		    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/src/${filename}" "${outname}"
-	    )
-    endmacro()
-    copy_helper("Inter-VariableFont.ttf")
-endif()
-
 # set some extra configs for each platform
 set_target_properties(${EXECUTABLE_NAME} PROPERTIES 
+    # Launch without a console window when opened from Explorer.
+    WIN32_EXECUTABLE TRUE
     # On macOS, make a proper .app bundle instead of a bare executable
     MACOSX_BUNDLE TRUE
     # Set the Info.plist file for Apple Mobile platforms. Without this file, your app

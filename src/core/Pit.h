@@ -7,14 +7,14 @@ class PIT
 public:
     void reset() {
         ticks_ = 0;
-        for (int i = 0; i < 3; ++i) {
-            counters_[i].reset();
+        for (auto& counter : counters_) {
+            counter.reset();
         }
     }
 
     void stubInit() {
-        for (int i = 0; i < 3; ++i) {
-            counters_[i].stubInit();
+        for (auto& counter : counters_) {
+            counter.stubInit();
         }
     }
 
@@ -40,8 +40,8 @@ public:
     // Tick the PIT once.
     void tick() {
         ticks_++;
-        for (int i = 0; i < 3; ++i) {
-            counters_[i].tick();
+        for (auto& counter : counters_) {
+            counter.tick();
         }
     }
 
@@ -51,16 +51,14 @@ public:
         return ticks_;
     }
 
-    void setGate(const int counter, const bool gate) {
-        counters_[counter].setGate(gate);
-    }
+    void setGate(const int counter, const bool gate) { counters_[counter].setGate(gate); }
 
     [[nodiscard]]
     bool getOutput(const int counter) const {
         return counters_[counter].output;
     }
 
-    //int getMode(int counter) { return _counters[counter]._control; }
+    // int getMode(int counter) { return _counters[counter]._control; }
 private:
     enum State
     {
@@ -295,9 +293,8 @@ private:
             count = new_count;
             switch (control_byte & 0x0e) {
                 case 0x00: // Interrupt on Terminal Count
-                    if (state == stateWaitingForCount) {
-                        state = stateLoadDelay;
-                    }
+                    // Every completed mode 0 write reloads the counting element.
+                    state = stateLoadDelay;
                     output = false;
                     break;
                 case 0x02: // Programmable One-Shot
@@ -433,4 +430,4 @@ private:
     Counter counters_[3] = {};
 };
 
-#endif //PIT_H
+#endif // PIT_H
