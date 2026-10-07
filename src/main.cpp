@@ -11,11 +11,21 @@
 #include <mutex>
 #include <string_view>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <io.h>
+#include <windows.h>
+#endif
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_mixer/SDL_mixer.h>
-#include <SDL3_ttf/SDL_ttf.h>
 
 #include "Blip_Buffer.h"
 
@@ -324,8 +334,37 @@ SDL_AppResult SDL_Fail() {
     return SDL_APP_FAILURE;
 }
 
+#ifdef _WIN32
+static void attachParentConsole() {
+    // Preserve pipes and redirected files when reconnecting terminal output.
+    const auto needs_console = [](FILE* stream)
+    {
+        const int fd = _fileno(stream);
+        return fd < 0 || GetFileType(reinterpret_cast<HANDLE>(_get_osfhandle(fd))) == FILE_TYPE_UNKNOWN;
+    };
+    const bool connect_stdout = needs_console(stdout);
+    const bool connect_stderr = needs_console(stderr);
+
+    // Explorer has no console to attach to. Never allocate a new one.
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+        return;
+    }
+
+    FILE* stream = nullptr;
+    if (connect_stdout) {
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+    }
+    if (connect_stderr) {
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+    }
+}
+#endif
+
 // SDL Application Initialization callback. We do all our emulator initialization here.
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
+#ifdef _WIN32
+    attachParentConsole();
+#endif
 
     auto cfg = Config{};
 
@@ -448,11 +487,6 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_Fail();
     }
 
-    // Initialize SDL TTF (unused at the moment...)
-    if (not TTF_Init()) {
-        return SDL_Fail();
-    }
-
     // Create our main window. We want it to be resizable and high-DPI aware.
     SDL_Window* window = SDL_CreateWindow("XTCE-Blue", windowStartWidth, windowStartHeight,
                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -493,10 +527,14 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     const std::filesystem::path basePath = basePathPtr;
 
     // Initialize audio
-    SDL_AudioDeviceID audio_device;
-    MIX_Mixer* mixer;
-    SDL_AudioStream* stream;
-    init_audio(&audio_device, &mixer, &stream);
+    SDL_AudioDeviceID audio_device = 0;
+    MIX_Mixer* mixer = nullptr;
+    SDL_AudioStream* stream = nullptr;
+    if (!init_audio(&audio_device, &mixer, &stream)) {
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        return SDL_Fail();
+    }
 
     // Create a Machine - this represents our emulator core.
     auto machine = new Machine();
@@ -925,13 +963,13 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
         SDL_DestroyRenderer(app->renderer);
         SDL_DestroyWindow(app->window);
 
+        SDL_DestroyAudioStream(app->pc_speaker_stream);
         MIX_DestroyMixer(app->mixer);
         SDL_CloseAudioDevice(app->audio_device);
 
         delete app;
     }
 
-    TTF_Quit();
     MIX_Quit();
 
     SDL_Log("Application quit successfully!");
@@ -942,6 +980,12 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
 
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512");
 
+    // 1) Init SDL_mixer
+    if (!MIX_Init()) {
+        SDL_Log("MIX_Init failed: %s", SDL_GetError());
+        return false;
+    }
+
     // Desired audio spec
     constexpr auto out_spec = SDL_AudioSpec{
         .format = SDL_AUDIO_S16,
@@ -949,51 +993,54 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
         .freq = AUDIO_SAMPLE_RATE,
     };
 
-    // 1) Init SDL audio
+    // 2) Init SDL audio
     const SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &out_spec);
     if (not audio_device) {
         SDL_Log("Failed to open audio device: %s", SDL_GetError());
-        return false;
-    }
-
-    // 2) Init SDL_mixer
-    if (not MIX_Init()) {
-        // returns bool in SDL3_mixer
-        SDL_Log("MIX_Init failed: %s", SDL_GetError());
+        MIX_Quit();
         return false;
     }
 
     // 3) Create a mixer bound to the default playback device.
     MIX_Mixer* mixer = MIX_CreateMixerDevice(audio_device, &out_spec);
-    if (not mixer) {
-        SDL_Log("Mix_OpenAudioDevice failed: %s", SDL_GetError());
+    if (!mixer) {
+        SDL_Log("MIX_CreateMixerDevice failed: %s", SDL_GetError());
         SDL_CloseAudioDevice(audio_device);
+        MIX_Quit();
         return false;
     }
 
-    SDL_Log("Audio initialized successfully (device %u)", audio_device);
-
-    // 4) Create an audio stream
-    // Create an Audio stream for the PC speaker.
+    // SDL converts the mono speaker samples to the device's output format.
     constexpr auto in_spec = SDL_AudioSpec{
         .format = SDL_AUDIO_S16,
         .channels = 1,
         .freq = AUDIO_SAMPLE_RATE,
     };
+
+    // 4) Create an audio stream
+    // Create an Audio stream for the PC speaker.
     SDL_AudioStream* stream = SDL_CreateAudioStream(&in_spec, &out_spec);
     if (not stream) {
         SDL_Log("SDL_CreateAudioStream failed: %s", SDL_GetError());
         MIX_DestroyMixer(mixer);
         SDL_CloseAudioDevice(audio_device);
+        MIX_Quit();
         return false;
     }
 
-    SDL_BindAudioStream(audio_device, stream);
-    SDL_ResumeAudioDevice(audio_device);
+    if (!SDL_BindAudioStream(audio_device, stream) || !SDL_ResumeAudioDevice(audio_device)) {
+        SDL_Log("Failed to start PC speaker audio: %s", SDL_GetError());
+        SDL_DestroyAudioStream(stream);
+        MIX_DestroyMixer(mixer);
+        SDL_CloseAudioDevice(audio_device);
+        MIX_Quit();
+        return false;
+    }
     *outAudioDevice = audio_device;
     *outMixer = mixer;
     *outStream = stream;
 
+    SDL_Log("Audio initialized successfully (device %u)", audio_device);
     return true;
 }
 

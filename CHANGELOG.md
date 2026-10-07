@@ -12,6 +12,8 @@
 
 ### Changed
 
+- Windows builds no longer open a console window when launched from Explorer.
+- Disabled unused SDL_mixer decoders.
 - Increased PC speaker volume.
 - Capped presentation at 240 FPS to reduce CPU/GPU load.
 - Decoupled CPU timing from rendering and audio. Fixed pause/reset timing and catch-up after stalls.
