@@ -140,10 +140,10 @@ set(SDLMIXER_VENDORED ON)
 set(SDLMIXER_WAVE ON CACHE BOOL "Enable WAVE audio" FORCE)
 foreach(decoder IN ITEMS
         AIFF AU VOC
-        FLAC_LIBFLAC FLAC_DRFLAC
-        GME MOD_XMP
-        MP3_DRMP3 MP3_MPG123
-        MIDI_FLUIDSYNTH MIDI_TIMIDITY
+        FLAC FLAC_LIBFLAC FLAC_DRFLAC
+        GME MOD MOD_XMP
+        MP3 MP3_DRMP3 MP3_MPG123
+        MIDI MIDI_FLUIDSYNTH MIDI_TIMIDITY
         OPUS VORBIS_STB VORBIS_VORBISFILE VORBIS_TREMOR
         WAVPACK)
     set(SDLMIXER_${decoder} OFF CACHE BOOL "Unused SDL_mixer decoder" FORCE)
@@ -195,22 +195,20 @@ set_target_properties(${EXECUTABLE_NAME} PROPERTIES
 # on Visual Studio, set our app as the default project
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT "${EXECUTABLE_NAME}")
 
-# On macOS Platforms, ensure that the bundle is valid for distribution by calling fixup_bundle.
-# note that fixup_bundle does not work on iOS, so you will want to use static libraries 
-# or manually copy dylibs and set rpaths
-if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-    # tell Install about the target, otherwise fixup won't know about the transitive dependencies
+# Stage the macOS app where the DMG workflow expects it.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     install(TARGETS ${EXECUTABLE_NAME}
-    	BUNDLE DESTINATION ./install COMPONENT Runtime
-   	    RUNTIME DESTINATION ./install/bin COMPONENT Runtime
+        BUNDLE DESTINATION release COMPONENT Runtime
     )
-	
-    set(DEP_DIR "${CMAKE_BINARY_DIR}")  # where to look for dependencies when fixing up
-    INSTALL(CODE 
-        "include(BundleUtilities)
-        fixup_bundle(\"$<TARGET_BUNDLE_DIR:${EXECUTABLE_NAME}>\" \"\" \"${DEP_DIR}\")
-        " 
-    )
+
+    # Fix dependencies in the installed app that will actually go into the DMG.
+    install(CODE "
+        include(BundleUtilities)
+        fixup_bundle(
+            \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/release/${EXECUTABLE_NAME}.app\"
+            \"\"
+            \"${CMAKE_BINARY_DIR}/$<CONFIG>;${CMAKE_BINARY_DIR}\")
+    " COMPONENT Runtime)
     set(CPACK_GENERATOR "DragNDrop")
     include(CPack)
 endif()
