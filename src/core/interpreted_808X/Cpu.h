@@ -978,7 +978,7 @@ private:
                     auxiliary_ = auxiliary_ || low_gt9;
 
                     v = (al + (auxiliary_ ? 0x06 : 0) + (carry_ ? 0x60 : 0)) & 0xff;
-                    overflow_ = (al & 0x80) == 0 && (v & 0x80) != 0;
+                    overflow_ = (~al & v & 0x80) != 0;
                     doPZS(v);
                     break;
                 }
@@ -994,14 +994,14 @@ private:
                 carry_ = (auxiliary_ || (a & 0xf) > 9);
                 auxiliary_ = carry_;
                 v = a + (carry_ ? 6 : 0);
-                overflow_ = topBit(v & (v ^ a));
+                overflow_ = (~a & v & 0x80) != 0;
                 doPZS(v);
                 return v & 0x0f;
             case 0x17: // AAS
                 carry_ = (auxiliary_ || (a & 0xf) > 9);
                 auxiliary_ = carry_;
                 v = a - (carry_ ? 6 : 0);
-                overflow_ = topBit(a & (v ^ a));
+                overflow_ = (a & ~v & 0x80) != 0;
                 doPZS(v);
                 return v & 0x0f;
             case 0x18: // INC

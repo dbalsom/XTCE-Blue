@@ -214,17 +214,12 @@ bool TestRunner::runTest(CpuType& cpu, const Moo::Reader::Test& test, const std:
     add_message(queue);
 
     for (const auto r : Moo::REG16Range()) {
-        uint16_t expected = test.GetFinalRegister(r, false);
+        const uint16_t expected = test.GetFinalRegister(r, false);
         // PC is the BIU fetch pointer. At the terminating first-byte signal,
         // the address of the newly decoded instruction is the architectural IP.
-        uint16_t actual = r == Moo::REG16::IP ? cpu.getInstructionPointer() : cpu.getRegister(MooRegToRegister(r));
+        const uint16_t actual = r == Moo::REG16::IP ? cpu.getInstructionPointer() : cpu.getRegister(MooRegToRegister(r));
 
-        if (test.final_state.masks.HasRegister(r)) {
-            expected &= test.final_state.masks.GetRegister(r);
-            actual &= test.final_state.masks.GetRegister(r);
-        }
-
-        if (actual == expected) {
+        if (matchesSstRegister(test, r, actual)) {
             continue;
         }
 

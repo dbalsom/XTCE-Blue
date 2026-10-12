@@ -10,6 +10,15 @@
 #include "../core/cpu_types.h"
 #include "../moo/mooreader.h"
 
+inline bool matchesSstRegister(const Moo::Reader::Test& test, const Moo::REG16 reg, const uint16_t actual) {
+    const uint16_t expected = test.GetFinalRegister(reg, false);
+    // SST captures the hardware's undefined flags too. Always compare the full
+    // FLAGS word, even when the file supplies a mask for undefined bits.
+    const uint16_t mask = reg != Moo::REG16::FLAGS && test.final_state.masks.HasRegister(reg)
+        ? test.final_state.masks.GetRegister(reg) : 0xffff;
+    return ((actual ^ expected) & mask) == 0;
+}
+
 struct SstTraceComparison {
     std::string timing;
     std::string bus;

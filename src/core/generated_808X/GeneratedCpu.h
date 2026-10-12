@@ -530,7 +530,6 @@ private:
     uint16_t calculateALU() {
         const auto operation = Fixed ? Op : alu_;
         const auto input = Fixed ? Input : alu_input_;
-        uint16_t t;
         uint32_t a = registers_[static_cast<int>(input) + 12], v = 0;
 
         switch (operation) {
@@ -581,65 +580,33 @@ private:
 
             case AluOp::DAA: // DAA
                 {
-                    const bool old_af = auxiliary_;
-                    const bool old_cf = carry_;
-                    t = a;
-                    auto adj = 0;
+                    const auto al = static_cast<uint8_t>(a);
+                    const bool low_gt9 = (al & 0x0f) > 9;
 
-                    // NMOS DAA's undefined OF behavior, also modeled by MartyPC.
-                    overflow_ = (a <= 0x7f) && ((!old_cf && a >= 0x7A) || (old_cf && a >= 0x1A));
+                    // Calculate CF before modifying AF.
+                    carry_ = carry_ || (al >> 4) > 9 || ((al >> 4) == 9 && low_gt9 && !auxiliary_);
+                    auxiliary_ = auxiliary_ || low_gt9;
 
-                    if (old_af || (a & 0x0f) > 9) {
-                        adj = 6;
-                        t = a + adj;
-                        auxiliary_ = true;
-                    }
-
-                    if (carry_ || a > (old_af ? 0x9fU : 0x99U)) {
-                        adj = 0x60;
-                        v = t + adj;
-                        carry_ = true;
-                    }
-                    else {
-                        v = t;
-                    }
-
+                    v = (al + (auxiliary_ ? 0x06 : 0) + (carry_ ? 0x60 : 0)) & 0xff;
+                    overflow_ = (~al & v & 0x80) != 0;
                     doPZS(v);
                     break;
                 }
 
             case AluOp::DAS: // DAS
-                {
-                    bool old_af = auxiliary_;
-                    t = a;
-                    auto adj = 0;
+                carry_ = carry_ || a > (auxiliary_ ? 0x9fU : 0x99U);
+                auxiliary_ = auxiliary_ || (a & 0x0f) > 9;
 
-                    if (old_af || (a & 0x0f) > 9) {
-                        t = a - 6;
-                        adj = 6;
-                        auxiliary_ = true;
-                    }
-
-                    if (carry_ || a > (old_af ? 0x9fU : 0x99U)) {
-                        v = t - 0x60;
-                        adj = 0x60;
-                        carry_ = true;
-                    }
-                    else {
-                        v = t;
-                    }
-
-                    // NMOS DAS reports overflow from the last adjustment.
-                    overflow_ = ((a ^ adj) & (a ^ v) & 0x80) != 0;
-                    doPZS(v);
-                    break;
-                }
+                v = a - (auxiliary_ ? 0x06 : 0) - (carry_ ? 0x60 : 0);
+                overflow_ = (a & ~v & 0x80) != 0;
+                doPZS(v);
+                break;
 
             case AluOp::AAA: // AAA
                 carry_ = (auxiliary_ || (a & 0xf) > 9);
                 auxiliary_ = carry_;
                 v = a + (carry_ ? 6 : 0);
-                overflow_ = topBit(v & (v ^ a));
+                overflow_ = (~a & v & 0x80) != 0;
                 doPZS(v);
 
                 return v & 0x0f;
@@ -648,7 +615,7 @@ private:
                 carry_ = (auxiliary_ || (a & 0xf) > 9);
                 auxiliary_ = carry_;
                 v = a - (carry_ ? 6 : 0);
-                overflow_ = topBit(a & (v ^ a));
+                overflow_ = (a & ~v & 0x80) != 0;
                 doPZS(v);
 
                 return v & 0x0f;
