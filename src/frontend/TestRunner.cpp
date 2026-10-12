@@ -7,6 +7,7 @@
 #include "TestRunner.h"
 
 #include <ranges>
+#include <type_traits>
 
 Register MooRegToRegister(const Moo::REG16 reg) {
     switch (reg) {
@@ -67,8 +68,9 @@ static std::string printFlagDiff(uint16_t expected, uint16_t actual) {
         const int e = (expected >> bit) & 1;
         const int a = (actual >> bit) & 1;
         if (e != a) {
-            if (!first)
+            if (!first) {
                 out += "; ";
+            }
             out += std::format("{}:e{},a{}", name, e, a);
             first = false;
         }
@@ -81,7 +83,8 @@ static std::string printFlagDiff(uint16_t expected, uint16_t actual) {
 
 bool TestRunner::runAllTests(size_t max_tests) {
 
-    bool all_ok = true;
+    std::cout << "CPU: " << cpuSelectionName(selection_) << "\n";
+    bool all_ok = !files_.empty();
     for (const auto& filepath : files_) {
         if (!runTestFile(filepath, max_tests)) {
             all_ok = false;
@@ -109,8 +112,20 @@ bool TestRunner::runTestFile(const std::filesystem::path& filepath, size_t max_t
     std::cout << "CPU: " << header.cpu_name << "\n";
     std::cout << "Test Count: " << header.test_count << "\n";
 
-    auto ctx = TestContext{.cpu = Cpu<StubBus>(), .max_tests = max_tests};
+    if (header.cpu_type != Moo::Reader::CPU8088) {
+        std::cerr << "SST file model does not match selected " << cpuSelectionId(selection_) << '\n';
+        return false;
+    }
+    ++total_files_run_;
+    if (selection_.execution == CpuExecution::Generated) {
+        return runCases<xtce::generated::Cpu<StubBus>>(reader, filepath, max_tests);
+    }
+    return runCases<Cpu<StubBus>>(reader, filepath, max_tests);
+}
 
+template<class CpuType>
+bool TestRunner::runCases(Moo::Reader& reader, const std::filesystem::path& filepath, size_t max_tests) {
+    CpuType cpu;
     bool file_ok = true;
     // Run up to max_tests for this file (if max_tests == 0, run all)
     size_t per_file_count = 0;
@@ -118,18 +133,18 @@ bool TestRunner::runTestFile(const std::filesystem::path& filepath, size_t max_t
         if (max_tests != 0 && per_file_count >= max_tests) {
             break; // per-file cap reached
         }
-        if (!runTest(ctx, test, filepath)) {
+        if (!runTest(cpu, test, filepath)) {
             file_ok = false;
         }
         ++per_file_count;
     }
 
-    ++total_files_run_;
     return file_ok;
 }
 
-bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const std::filesystem::path& filepath) {
-    auto& cpu = ctx.cpu;
+// Run a single CPU test
+template<class CpuType>
+bool TestRunner::runTest(CpuType& cpu, const Moo::Reader::Test& test, const std::filesystem::path& filepath) {
     cpu.reset();
     cpu.getBus()->reset();
 
@@ -138,14 +153,22 @@ bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const 
     auto& summary = file_summaries_[fname];
     ++summary.total;
 
+    // Set initial registers
     for (const auto r : Moo::REG16Range()) {
         cpu.setRegister(MooRegToRegister(r), test.GetInitialRegister(r));
     }
+
+    // Write initial RAM
     for (const auto& [address, value] : test.init_state.ram) {
         cpu.getBus()->ram()[address & 0xfffff] = value;
     }
+
     const auto prefetched = std::min(test.bytes.size(), test.init_state.queue.bytes.size());
+
     cpu.getBus()->setInstructionFetchBytes(test.bytes.size() - prefetched);
+    if constexpr (std::is_same_v<CpuType, xtce::generated::Cpu<StubBus>>) {
+        cpu.getBus()->setInstructionStream(test.bytes, prefetched);
+    }
     cpu.setPrefetchQueue(test.init_state.queue.bytes);
     cpu.setBusCycleCapture(true);
 
@@ -175,8 +198,9 @@ bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const 
     auto add_message = [&](const std::string& text)
     {
         if (save_detail && !text.empty()) {
-            if (!message.empty())
+            if (!message.empty()) {
                 message += "\n  ";
+            }
             message += text;
         }
     };
@@ -220,6 +244,8 @@ bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const 
                                     expected, actual));
         }
     }
+
+    // Validate final RAM array
     for (const auto& [address, expected] : test.final_state.ram) {
         const auto actual = cpu.getBus()->ram()[address & 0xfffff];
         if (actual != expected) {
@@ -229,6 +255,7 @@ bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const 
             mem_failed = true;
         }
     }
+
     const bool timing_failed = !timing.empty();
     const bool bus_failed = !bus.empty();
     const bool queue_failed = !queue.empty();
@@ -253,17 +280,25 @@ bool TestRunner::runTest(TestContext& ctx, const Moo::Reader::Test& test, const 
             detail.file = fname;
             detail.test_index = test.index;
             detail.test_name = test.name;
+
             if (test.has_hash) {
-                for (auto byte : test.hash)
+                for (auto byte : test.hash) {
                     detail.test_hash += std::format("{:02x}", byte);
+                }
             }
+
             detail.cycles_taken = step.instruction_cycles;
             detail.message = std::move(message);
+
             for (const auto r : Moo::REG16Range()) {
                 detail.regs.push_back(r == Moo::REG16::IP ? cpu.getInstructionPointer()
                                                           : cpu.getRegister(MooRegToRegister(r)));
             }
-            detail.cycle_logs = cpu.getCycleLogBuffer();
+
+            for (const auto& entry : cpu.getCycleLogBuffer()) {
+                cpu.formatCycleLogEntry(entry, detail.cycle_logs.emplace_back());
+            }
+
             failure_details_.push_back(std::move(detail));
             ++summary.details_saved;
         }
@@ -281,8 +316,9 @@ static void printRegisters(const std::vector<uint16_t>& regs, int indent = 0, st
     std::unordered_map<int, uint16_t> map;
     size_t i = 0;
     for (const auto r : Moo::REG16Range()) {
-        if (i < regs.size())
+        if (i < regs.size()) {
             map[static_cast<int>(r)] = regs[i++];
+        }
     }
 
     auto get = [&](Moo::REG16 r) -> uint16_t

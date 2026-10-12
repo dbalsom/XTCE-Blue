@@ -20,7 +20,7 @@ void DisassemblyWindow::show(bool* open) {
 
     const uint16_t cs = s_regs[1];
     //const uint16_t ip = _machine->getRealIP();
-    const uint32_t ip = _machine->getCpu()->getInstructionPointer();
+    const uint32_t ip = _machine->getInstructionPointer();
     uint32_t phys_addr = ((static_cast<uint32_t>(cs) << 4) + static_cast<uint32_t>(ip)) & 0xFFFFF;
     Disassembler disasm;
     disasm.reset();

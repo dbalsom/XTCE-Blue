@@ -1,6 +1,14 @@
 <component name="ProjectDictionaryState">
   <dictionary name="project">
     <words>
+      <w>AMWC</w>
+      <w>IORC</w>
+      <w>IOWC</w>
+      <w>MRDC</w>
+      <w>MWTC</w>
+      <w>TMPA</w>
+      <w>TMPB</w>
+      <w>TMPC</w>
       <w>autoinitialization</w>
       <w>balsom</w>
       <w>crtc</w>
@@ -8,11 +16,13 @@
       <w>disasm</w>
       <w>dmac</w>
       <w>hchar</w>
+      <w>lchar</w>
       <w>microcoded</w>
       <w>mooheader</w>
       <w>repne</w>
       <w>strobed</w>
       <w>vram</w>
+      <w>vsyncs</w>
       <w>xtce</w>
     </words>
   </dictionary>

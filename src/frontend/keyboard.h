@@ -132,6 +132,8 @@ inline uint8_t translate_SDL_key(SDL_Keycode code, bool pressed) {
             break;
     }
 
-    if (sc != 0 && !pressed) sc |= 0x80; // set high bit for key-up
+    if (sc != 0 && !pressed) {
+        sc |= 0x80; // set high bit for key-up
+    }
     return sc;
 }

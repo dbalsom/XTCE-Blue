@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include "cpu_types.h"
 
 #include "Cga.h"
 #include "Dmac.h"
@@ -72,6 +73,7 @@ public:
     void reset() {
         std::ranges::fill(ram_, 0);
         dmac_.reset();
+        std::ranges::fill(dma_pages_, 0);
         pic_.reset();
         pit_.reset();
         ppi_.reset();
@@ -107,17 +109,15 @@ public:
     // Use the same cached level supplied to the speaker callback.
     [[nodiscard]] bool speakerLevel() const { return counter2_output_ && speaker_mask_; }
 
-    void startAccess(const uint32_t address, const int type) {
+    void startAccess(const uint32_t address, const BusStatus bus_status) {
         address_ = address;
-        type_ = type;
+        bus_status_ = bus_status;
         cycle_ = 0;
     }
 
     void tick() {
         _ticks++;
-        for (int i = 0; i < 3; ++i) {
-            cga_.tick();
-        }
+        cga_.tick3();
         cga_phase_ = (cga_phase_ + 3) & 0x0f;
         pit_phase_++;
 
@@ -198,7 +198,7 @@ public:
         // http://www.vcfed.org/forum/showthread.php?29211-Purpose-of-U90-in-XT-second-revision-board
         bool hasDMACFix = true;
 
-        if (type_ != 2 || (address_ & 0x3e0) != 0x000 || !hasDMACFix) {
+        if (bus_status_ != BusStatus::IoWrite || (address_ & 0x3e0) != 0x000 || !hasDMACFix) {
             last_non_dma_ready_ = nonDMAReady();
         }
         // if (_previousLock && !_lock)
@@ -295,7 +295,7 @@ public:
     bool ready() { return dmaReady() && nonDMAReady(); }
 
     void write(uint8_t data) {
-        if (type_ == 2) {
+        if (bus_status_ == BusStatus::IoWrite) {
             // IO write
             switch (address_ & 0x3e0) {
                 case 0x00:
@@ -358,19 +358,19 @@ public:
     }
 
     uint8_t read() {
-        if (type_ == 0) {
+        if (bus_status_ == BusStatus::InterruptAcknowledge) {
             // Interrupt acknowledge
-            auto i = pic_.interruptAcknowledge();
+            const auto i = pic_.interruptAcknowledge();
             if (i != 0xFF && i != 0x08) {
                 std::cout << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n"
                           << std::flush;
             }
             return i;
         }
-        if (type_ == 1) {
+        if (bus_status_ == BusStatus::IoRead) {
             // IO read
 
-            // noisy trace debu
+            // noisy trace debug
             // std::cout << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
 
             // Read from IO port
@@ -446,18 +446,14 @@ public:
 
     [[nodiscard]] uint8_t getDMA() const { return dmac_.getRequestLines() | (dack0() ? 0x10 : 0); }
 
-    std::string snifferExtra() {
-        return ""; // hex(_pit.getMode(1), 4, false) + " ";
-    }
-
-    [[nodiscard]] int getBusOperation() const {
+    [[nodiscard]] BusStatus getBusOperation() const {
         switch (dma_state_) {
             case s2:
-                return 5; // memr
+                return BusStatus::MemoryRead;
             case s3:
-                return 2; // iow
+                return BusStatus::IoWrite;
             default:
-                return 0;
+                return BusStatus::Passive;
         }
     }
 
@@ -473,10 +469,12 @@ public:
 
     [[nodiscard]] uint8_t getDMAS() const {
         if (dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
-            dma_state_ == sWait)
+            dma_state_ == sWait) {
             return 3;
-        if (dma_state_ == sHRQ || dma_state_ == sHoldWait || dma_state_ == sPreAEN)
+        }
+        if (dma_state_ == sHRQ || dma_state_ == sHoldWait || dma_state_ == sPreAEN) {
             return 1;
+        }
         return 0;
     }
 
@@ -485,14 +483,16 @@ public:
 private:
     [[nodiscard]] bool dmaReady() const {
         if (dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait || dma_state_ == s4 ||
-            dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/)
+            dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/) {
             return false;
+        }
         return true;
     }
 
     [[nodiscard]] bool nonDMAReady() const {
-        if (type_ == 1 || type_ == 2) // Read port, write port
+        if (bus_status_ == BusStatus::IoRead || bus_status_ == BusStatus::IoWrite) {
             return cycle_ > 2; // System board adds a wait state for onboard IO devices
+        }
         return true;
     }
 
@@ -561,8 +561,8 @@ private:
     }
 
     [[nodiscard]] uint32_t dmaAddressHigh(const int channel) const {
-        // static const int pageRegister[4] = {0x83, 0x83, 0x81, 0x82};
-        return static_cast<uint32_t>(dma_pages_[channel & 3]) << 16;
+        // The XT DMA controller drives only A16-A19 above its 16-bit address.
+        return static_cast<uint32_t>(dma_pages_[channel & 3] & 0x0f) << 16;
     }
 
     enum DMAState
@@ -587,7 +587,7 @@ private:
     std::vector<uint8_t> ram_;
     std::vector<uint8_t> rom_;
     uint32_t address_;
-    int type_;
+    BusStatus bus_status_;
     int cycle_;
     DMAC dmac_;
     PIC pic_;

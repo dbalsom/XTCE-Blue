@@ -25,13 +25,10 @@ endif()
 # Set the name of the executable
 set(EXECUTABLE_NAME ${PROJECT_NAME})
 
-add_executable(${EXECUTABLE_NAME}
-        src/core/cpu_types.h
-        src/frontend/Composite.h)
+add_executable(${EXECUTABLE_NAME})
 
 target_include_directories(${EXECUTABLE_NAME}
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/core
         ${CMAKE_SOURCE_DIR}/src/moo
         ${CMAKE_SOURCE_DIR}/src/third_party/blip_buffer
         ${CMAKE_SOURCE_DIR}/src/third_party/CLI11)
@@ -42,51 +39,29 @@ target_sources(${EXECUTABLE_NAME}
         src/main.cpp
         src/benchmark.cpp
         src/benchmark.h
-        src/core/Machine.cpp
-        src/core/Machine.h
         src/xtce_blue.h
-        src/core/bios.h
-        src/core/font.h
-        src/core/Dmac.h
-        src/core/Pic.h
-        src/core/Pit.h
-        src/core/Ppi.h
-        src/core/Disassembler.h
-        src/core/Cga.cpp
-        src/core/Cga.h
-        src/core/Crtc.cpp
-        src/core/Crtc.h
-        src/frontend/DisplayRenderer.cpp
-        src/frontend/DisplayRenderer.h
-        src/gui/imgui_memory_editor.h
-        src/gui/DebuggerManager.h
-        src/gui/DebuggerManager.cpp
-        src/gui/DisassemblyWindow.h
-        src/gui/DisassemblyWindow.cpp
-        src/gui/CpuStatusWindow.h
-        src/gui/CpuStatusWindow.cpp
-        src/gui/MemoryViewerWindow.cpp
-        src/gui/MemoryViewerWindow.h
-        src/gui/CycleLogWindow.cpp
-        src/gui/CycleLogWindow.h
-        src/gui/StackViewerWindow.cpp
-        src/gui/StackViewerWindow.h
-        src/gui/VideoCardStatusWindow.cpp
-        src/gui/VideoCardStatusWindow.h
-        src/gui/PicStatusWindow.cpp
-        src/gui/DmacStatusWindow.cpp
-        src/gui/DisplayDebugWindow.cpp
-        src/gui/InstructionHistoryWindow.h
-        src/gui/InstructionHistoryWindow.cpp
         src/third_party/blip_buffer/Blip_Buffer.cpp
-        src/frontend/TestRunner.cpp
 )
+
+option(XTCE_DEBUG_SYMBOLS "Include application debug symbols in optimized builds" OFF)
+add_subdirectory(src/core)
+add_subdirectory(src/frontend)
+add_subdirectory(src/gui)
+target_link_libraries(${EXECUTABLE_NAME} PRIVATE xtce_core)
+
+option(XTCE_BUILD_TESTS "Build the standalone CPU and device regression tests" OFF)
+if(XTCE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# Keep symbols for CLion runtime inspection without changing optimization.
+if(XTCE_DEBUG_SYMBOLS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${EXECUTABLE_NAME} PRIVATE -g)
+endif()
 
 # Set C++ version
 target_compile_features(${EXECUTABLE_NAME} PUBLIC cxx_std_20)
-
-# Keep Blip's phase table layout consistent in the caller and library.
-target_compile_definitions(${EXECUTABLE_NAME} PRIVATE BLIP_PHASE_BITS=8)
 
 # on Web targets, we need CMake to generate a HTML webpage. 
 if(EMSCRIPTEN)
@@ -151,6 +126,7 @@ endforeach()
 add_subdirectory_quiet(SDL_mixer EXCLUDE_FROM_ALL)
 
 # Only zlib is needed from the SDL_image tree, for compressed SST files.
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Build unused zlib example programs" FORCE)
 add_subdirectory_quiet(SDL_image/external/zlib EXCLUDE_FROM_ALL)
 
 # Create a canonical ZLIB::ZLIB alias from whatever target zlib’s CMake defines

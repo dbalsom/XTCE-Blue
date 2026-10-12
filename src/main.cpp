@@ -70,6 +70,8 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
 struct Config
 {
     bool benchmark{false};
+    std::string cpu_core{cpuExecutionName(CpuSelection{}.execution)};
+    std::string cpu_model{cpuModelName(CpuSelection{}.model)};
     std::string test_path{};
     size_t test_max{0};
     // Expect two-digit hex strings like "00".."FF"
@@ -371,6 +373,8 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // Run CLI11 to parse command-line arguments
     CLI::App cli_app{std::format("{} v{}", APP_NAME, APP_VERSION)};
     argv = cli_app.ensure_utf8(argv);
+    cli_app.add_option("--cpu-core", cfg.cpu_core, "CPU execution: interpreted or generated");
+    cli_app.add_option("--cpu-model", cfg.cpu_model, "CPU model: 8088, 8086, v20 or v30 (machine currently supports 8088)");
     auto* benchmark_option =
         cli_app.add_flag("--benchmark", cfg.benchmark,
                          "Run headless and unthrottled until BIOS bootstrap (INT 19h), then print performance stats");
@@ -397,8 +401,17 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
+    CpuSelection cpu_selection;
+    try {
+        cpu_selection = parseCpuSelection(cfg.cpu_core, cfg.cpu_model);
+        validateMachineCpu(cpu_selection);
+    } catch (const std::exception& error) {
+        std::cerr << "CPU selection: " << error.what() << '\n';
+        return SDL_APP_FAILURE;
+    }
+
     if (cfg.benchmark) {
-        return runBenchmark();
+        return runBenchmark(cpu_selection);
     }
 
     // If subcommand was invoked, run tests and exit
@@ -406,10 +419,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         // Parse and validate two-digit hex opcode range strings
         auto parse_hex_byte = [&](const std::string& s, int& out) -> bool
         {
-            if (s.size() != 2)
+            if (s.size() != 2) {
                 return false;
-            if (!std::isxdigit(static_cast<unsigned char>(s[0])) || !std::isxdigit(static_cast<unsigned char>(s[1])))
+            }
+            if (!std::isxdigit(static_cast<unsigned char>(s[0])) || !std::isxdigit(static_cast<unsigned char>(s[1]))) {
                 return false;
+            }
             try {
                 out = std::stoi(s, nullptr, 16);
             }
@@ -434,20 +449,23 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             return SDL_APP_FAILURE;
         }
 
-        const auto test_runner = new TestRunner();
+        const auto test_runner = new TestRunner(cpu_selection);
         if (!cfg.test_path.empty()) {
             const std::filesystem::path p(cfg.test_path);
             if (std::filesystem::is_directory(p)) {
                 for (const auto& entry : std::filesystem::directory_iterator(p)) {
-                    if (!entry.is_regular_file())
+                    if (!entry.is_regular_file()) {
                         continue;
+                    }
                     const auto name = entry.path().filename().string();
-                    if (name.size() < 3)
+                    if (name.size() < 3) {
                         continue;
+                    }
                     // Expect filename starting with two hex digits followed by a dot, e.g. "00.MOO.gz"
                     if (!std::isxdigit(static_cast<unsigned char>(name[0])) ||
-                        !std::isxdigit(static_cast<unsigned char>(name[1])) || name[2] != '.')
+                        !std::isxdigit(static_cast<unsigned char>(name[1])) || name[2] != '.') {
                         continue;
+                    }
                     int val = 0;
                     try {
                         val = std::stoi(name.substr(0, 2), nullptr, 16);
@@ -466,8 +484,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
                     std::isxdigit(static_cast<unsigned char>(name[1])) && name[2] == '.') {
                     try {
                         const int val = std::stoi(name.substr(0, 2), nullptr, 16);
-                        if (val >= startVal && val <= endVal)
+                        if (val >= startVal && val <= endVal) {
                             test_runner->addFiles(p.string());
+                        }
                     }
                     catch (...) {
                         /* ignore */
@@ -537,7 +556,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     // Create a Machine - this represents our emulator core.
-    auto machine = new Machine();
+    auto machine = new Machine(cpu_selection);
 
     // Set up our emulator application context.
     auto* ctx = new AppContext();
@@ -707,7 +726,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
     // Advance emulation and see if frames were emitted
     const auto virtual_frames_before = app->machine->getBus()->cga()->getDebugState().frame_count;
+    app->machine->beginCycleLogFrame();
     app->advanceEmulation(now, delta);
+    app->machine->endCycleLogFrame();
     if (const auto virtual_frames_after = app->machine->getBus()->cga()->getDebugState().frame_count;
         virtual_frames_after >= virtual_frames_before) {
         app->virtual_frame_count += virtual_frames_after - virtual_frames_before;
@@ -847,8 +868,8 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
             ImGui::NewLine();
             ImGui::TextWrapped("XTCE-Blue is a cycle-accurate IBM XT emulator written in C++ using SDL3 and ImGui. "
-                               "XTCE-Blue's 8088 emulation is powered by the XTCE 8088 CPU core - "
-                               "which emulates the 8088 at the microcode level.");
+                               "It supports interpreted and generated microcode execution.");
+            ImGui::Text("CPU: %s", app->machine->getCpuName().c_str());
 
             ImGui::NewLine();
             if (ImGui::Button("OK", ImVec2(120, 0))) {

@@ -1,6 +1,14 @@
 <component name="InspectionProjectProfileManager">
   <profile version="1.0">
     <option name="myName" value="Project Default" />
+    <!-- Keep modernization suggestions compatible with C++17. -->
+    <inspection_tool class="CppRedundantTypenameKeyword" enabled="false" level="WARNING" enabled_by_default="false" />
     <inspection_tool class="CppTooWideScopeInitStatement" enabled="false" level="HINT" enabled_by_default="false" />
+    <inspection_tool class="CppUseAssociativeContains" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="CppUseDesignatedInitializers" enabled="false" level="HINT" enabled_by_default="false" />
+    <inspection_tool class="CppUseElementsView" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="CppUseEraseAlgorithm" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="CppUseFamiliarTemplateSyntaxForGenericLambdas" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="CppUseRangeAlgorithm" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
   </profile>
 </component>

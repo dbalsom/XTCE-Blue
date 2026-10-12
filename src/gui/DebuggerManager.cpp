@@ -19,19 +19,25 @@ bool DebuggerManager::removeWindow(const std::string &name) {
 
 void DebuggerManager::setVisible(const std::string &name, bool v) {
     const auto it = _windows.find(name);
-    if (it == _windows.end()) return;
+    if (it == _windows.end()) {
+        return;
+    }
     it->second.visible = v;
 }
 
 bool DebuggerManager::isVisible(const std::string &name) const {
     const auto it = _windows.find(name);
-    if (it == _windows.end()) return false;
+    if (it == _windows.end()) {
+        return false;
+    }
     return it->second.visible;
 }
 
 bool DebuggerManager::toggleVisible(const std::string &name) {
     const auto it = _windows.find(name);
-    if (it == _windows.end()) return false;
+    if (it == _windows.end()) {
+        return false;
+    }
     it->second.visible = !it->second.visible;
     return it->second.visible;
 }
@@ -41,19 +47,25 @@ void DebuggerManager::drawMenuItems() {
     // Collect keys and sort them so menu appears in alphabetical order.
     std::vector<std::string> names;
     names.reserve(_windows.size());
-    for (auto &p : _windows) names.push_back(p.first);
+    for (auto& p : _windows) {
+        names.push_back(p.first);
+    }
     std::ranges::sort(names);
 
     for (const auto &name : names) {
         const auto it = _windows.find(name);
-        if (it == _windows.end()) continue; // should not happen
+        if (it == _windows.end()) {
+            continue; // should not happen
+        }
         auto &entry = it->second;
         bool v = entry.externalOpen ? *entry.externalOpen : entry.visible;
         if (ImGui::MenuItem(name.c_str(), nullptr, &v)) {
-            if (entry.externalOpen)
+            if (entry.externalOpen) {
                 *entry.externalOpen = v;
-            else
+            }
+            else {
                 entry.visible = v;
+            }
         }
     }
 }
@@ -74,7 +86,9 @@ void DebuggerManager::showAll() {
 std::vector<std::string> DebuggerManager::names() const {
     std::vector<std::string> out;
     out.reserve(_windows.size());
-    for (auto &p : _windows) out.push_back(p.first);
+    for (auto& p : _windows) {
+        out.push_back(p.first);
+    }
     std::ranges::sort(out);
     return out;
 }

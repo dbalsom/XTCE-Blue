@@ -12,14 +12,16 @@
 
 #include <zlib.h>
 
-#include "Cpu.h"
+#include "interpreted_808X/Cpu.h"
+#include "CpuSelection.h"
+#include "generated_808X/Cpu.h"
 #include "StubBus.h"
 #include "mooreader.h"
 
 class TestRunner
 {
 public:
-    TestRunner() = default;
+    explicit TestRunner(CpuSelection selection = {}) : selection_(selection) { validateMachineCpu(selection); }
 
     // Add all files matching .MOO or .MOO.gz from the provided path.
     // If `path` is a directory, it will be traversed recursively.
@@ -62,14 +64,10 @@ public:
     const std::vector<std::filesystem::path>& files() const { return files_; }
 
 private:
-    struct TestContext
-    {
-        Cpu<StubBus> cpu;
-        size_t max_tests;
-    };
-
+    CpuSelection selection_;
     bool runTestFile(const std::filesystem::path& filepath, size_t max_tests = 0);
-    bool runTest(TestContext& ctx, const Moo::Reader::Test& test, const std::filesystem::path& filepath);
+    template<class CpuType> bool runTest(CpuType& cpu, const Moo::Reader::Test& test, const std::filesystem::path& filepath);
+    template<class CpuType> bool runCases(Moo::Reader& reader, const std::filesystem::path& filepath, size_t max_tests);
 
     // Summary reporting
     size_t total_files_run_ = 0;

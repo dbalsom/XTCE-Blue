@@ -26,8 +26,9 @@ public:
             }
             counters_[counter].control(data & 0x3f);
         }
-        else
+        else {
             counters_[address].write(data);
+        }
     }
 
     uint8_t read(const uint32_t address) {

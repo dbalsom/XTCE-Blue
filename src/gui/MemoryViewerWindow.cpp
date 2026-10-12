@@ -26,7 +26,9 @@ void MemoryViewerWindow::show(bool *open) {
         // If the memory editor's internal Open was closed via the window close button,
         // propagate that to the external visibility pointer so DebuggerManager hides this window.
         if (! _memEditor.Open) {
-            if (open) *open = false;
+            if (open) {
+                *open = false;
+            }
             // Reset internal flag so the editor is ready next time it's shown.
             _memEditor.Open = true;
         }
@@ -36,7 +38,9 @@ void MemoryViewerWindow::show(bool *open) {
     // Conventional RAM
     _memEditor.DrawWindow("Memory Viewer", _machine->ram(), _machine->ramSize());
     if (! _memEditor.Open) {
-        if (open) *open = false;
+        if (open) {
+            *open = false;
+        }
         _memEditor.Open = true;
     }
 }

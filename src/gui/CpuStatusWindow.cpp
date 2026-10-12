@@ -113,7 +113,7 @@ void CpuStatusWindow::show(bool* open) {
             ImGui::NextColumn();
             ImGui::Text("IP: %04X", ip); //ImGui::NextColumn();
             ImGui::NextColumn();
-            ImGui::Text("IND: %04X", _machine->getCpu()->getInstructionPointer());
+            ImGui::Text("IND: %04X", _machine->getInstructionPointer());
 
             ImGui::Separator();
             ImGui::Columns(1, nullptr, false);
@@ -155,16 +155,18 @@ void CpuStatusWindow::show(bool* open) {
 
             // Prepare a stable bool array for the ImGui checkboxes to avoid analyzer warnings
             bool led_vals[16];
-            for (int i = 0; i < 16; ++i)
+            for (int i = 0; i < 16; ++i) {
                 led_vals[i] = ((flags >> i) & 1) != 0;
+            }
 
             // Build a list of visible (non-reserved) bits in order 15..0
             std::vector<int> visibleBits;
             visibleBits.reserve(16);
             for (int b = 15; b >= 0; --b) {
                 // Omit reserved entries and the bit-1 "1" pseudo-flag
-                if (std::strcmp(flag_names[b], "RES") != 0 && std::strcmp(flag_names[b], "1") != 0)
+                if (std::strcmp(flag_names[b], "RES") != 0 && std::strcmp(flag_names[b], "1") != 0) {
                     visibleBits.push_back(b);
+                }
             }
 
             ImGui::Columns(1);
@@ -232,7 +234,7 @@ void CpuStatusWindow::show(bool* open) {
             // Display prefetch queue contents
             ImGui::Separator();
             ImGui::Columns(1, nullptr, false);
-            ImGui::Text("Queue: %s", _machine->getCpu()->getQueueDebugString().c_str());
+            ImGui::Text("Queue: %s", _machine->getQueueDebugString().c_str());
 
             ImGui::Separator();
             ImGui::Columns(1, nullptr, false);
@@ -240,53 +242,8 @@ void CpuStatusWindow::show(bool* open) {
 
             ImGui::Separator();
             ImGui::Columns(1, nullptr, false);
-            switch (_machine->getCpu()->getMCState()) {
-                case Cpu<>::stateRunning:
-                    ImGui::Text("Microcode State: Running");
-                    break;
-                case Cpu<>::stateWaitingForQueueData:
-                    ImGui::Text("Microcode State: Waiting for Queue Data");
-                    break;
-                case Cpu<>::stateWaitingForQueueIdle:
-                    ImGui::Text("Microcode State: Waiting for Queue Idle");
-                    break;
-                case Cpu<>::stateIODelay2:
-                    ImGui::Text("Microcode State: IO Delay 2");
-                    break;
-                case Cpu<>::stateIODelay1:
-                    ImGui::Text("Microcode State: IO Delay 1");
-                    break;
-                case Cpu<>::stateWaitingUntilFirstByteCanStart:
-                    ImGui::Text("Microcode State: Waiting Until First Byte Can Start");
-                    break;
-                case Cpu<>::stateWaitingUntilFirstByteDone:
-                    ImGui::Text("Microcode State: Waiting Until First Byte Done");
-                    break;
-                case Cpu<>::stateWaitingUntilSecondByteDone:
-                    ImGui::Text("Microcode State: Waiting Until Second Byte Done");
-                    break;
-                case Cpu<>::stateSingleCycleWait:
-                    ImGui::Text("Microcode State: Single Cycle Wait");
-                    break;
-                case Cpu<>::stateHaltingStart:
-                    ImGui::Text("Microcode State: Halting Start");
-                    break;
-                case Cpu<>::stateHalting3:
-                    ImGui::Text("Microcode State: Halting 3");
-                    break;
-                case Cpu<>::stateHalting2:
-                    ImGui::Text("Microcode State: Halting 2");
-                    break;
-                case Cpu<>::stateHalting1:
-                    ImGui::Text("Microcode State: Halting 1");
-                    break;
-                case Cpu<>::stateHalted:
-                    ImGui::Text("Microcode State: Halted");
-                    break;
-                case Cpu<>::stateSuspending:
-                    ImGui::Text("Microcode State: Suspending");
-                    break;
-            }
+            ImGui::Text("CPU: %s", _machine->getCpuName().c_str());
+            ImGui::Text("Microcode State: %s", _machine->getExecutionState());
 
             ImGui::Separator();
             // Breakpoint controls (code breakpoint in form XXXX:XXXX)
@@ -345,16 +302,18 @@ void CpuStatusWindow::show(bool* open) {
             }
 
             // If live validation passes, clear any previous parse-error state; otherwise preserve it
-            if (bp_valid)
+            if (bp_valid) {
                 bp_parse_error = false;
+            }
 
             const bool show_invalid = (!bp_valid) || bp_parse_error;
             if (show_invalid) {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
             }
             ImGui::InputText("##bpaddr", bp_input, sizeof(bp_input));
-            if (show_invalid)
+            if (show_invalid) {
                 ImGui::PopStyleColor();
+            }
             ImGui::PopItemWidth();
 
             // Disable the Set button when input is invalid

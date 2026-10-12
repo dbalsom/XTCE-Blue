@@ -53,30 +53,40 @@ private:
         word_size_ = (opcode() & 1) != 0;
         dword_ = false;
         offset_ = 1;
-        if ((opcode() & 0xc4) == 0)
+        if ((opcode() & 0xc4) == 0) {
             return alu(op1()) + regMemPair();
-        if ((opcode() & 0xc6) == 4)
+        }
+        if ((opcode() & 0xc6) == 4) {
             return alu(op1()) + accum() + ", " + imm();
-        if ((opcode() & 0xe7) == 6)
+        }
+        if ((opcode() & 0xe7) == 6) {
             return "PUSH " + segreg(op1());
-        if ((opcode() & 0xe7) == 7)
+        }
+        if ((opcode() & 0xe7) == 7) {
             return "POP " + segreg(op1());
+        }
         if ((opcode() & 0xe7) == 0x26) {
             // Segment override prefix
             return segreg(op1() & 3) + ":";
         }
-        if ((opcode() & 0xf8) == 0x40)
+        if ((opcode() & 0xf8) == 0x40) {
             return "INC " + rwo();
-        if ((opcode() & 0xf8) == 0x48)
+        }
+        if ((opcode() & 0xf8) == 0x48) {
             return "DEC " + rwo();
-        if ((opcode() & 0xf8) == 0x50)
+        }
+        if ((opcode() & 0xf8) == 0x50) {
             return "PUSH " + rwo();
-        if ((opcode() & 0xf8) == 0x58)
+        }
+        if ((opcode() & 0xf8) == 0x58) {
             return "POP " + rwo();
-        if ((opcode() & 0xfc) == 0x80)
+        }
+        if ((opcode() & 0xfc) == 0x80) {
             return alu(reg()) + ea() + ", " + (opcode() == 0x81 ? iw(true) : sb(true));
-        if ((opcode() & 0xfc) == 0x88)
+        }
+        if ((opcode() & 0xfc) == 0x88) {
             return "MOV " + regMemPair();
+        }
         if ((opcode() & 0xf8) == 0x90) {
             if (opcode() == 0x90) {
                 // NOP is a special case of XCHG AX, AX
@@ -84,10 +94,12 @@ private:
             }
             return "XCHG AX, " + rwo();
         }
-        if ((opcode() & 0xf8) == 0xb0)
+        if ((opcode() & 0xf8) == 0xb0) {
             return "MOV " + rbo() + ", " + ib();
-        if ((opcode() & 0xf8) == 0xb8)
+        }
+        if ((opcode() & 0xf8) == 0xb8) {
             return "MOV " + rwo() + ", " + iw();
+        }
         if ((opcode() & 0xfc) == 0xd0) {
             static std::string shifts[8] =
                 {"ROL", "ROR", "RCL", "RCR", "SHL", "SHR", "SHL", "SAR"};
@@ -99,10 +111,12 @@ private:
             dword_ = true;
             return std::string("ESC ") + std::to_string(op0()) + ", " + std::to_string(reg()) + ", " + ea();
         }
-        if ((opcode() & 0xf6) == 0xe4)
+        if ((opcode() & 0xf6) == 0xe4) {
             return "IN " + accum() + ", " + port();
-        if ((opcode() & 0xf6) == 0xe6)
+        }
+        if ((opcode() & 0xf6) == 0xe6) {
             return "OUT " + port() + ", " + accum();
+        }
         if ((opcode() & 0xe0) == 0x60) {
             static std::string conds[16] = {
                 "O", "NO", "B", "AE", "E", "NE", "BE", "A",

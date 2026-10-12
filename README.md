@@ -45,7 +45,7 @@ XTCE-Blue is the only other PC emulator besides MartyPC that can run the final '
  - Stack display
  - Instruction disassembly display
  - Video card status display
-
+ - 
 ## Hardware Implementation Status
 
 Currently, XTCE-Blue has emulation of the following devices:
@@ -64,6 +64,21 @@ What it is currently lacking:
  - Serial Port(s)
  - Parallel Ports(s)
  - Game Port
+
+## CPU core selection
+
+The default CPU core is **generated-8088**. The **generated** core compiles Intel microcode
+into a C++ word switch. The hope was that this would be significantly faster than microcode interpretation; 
+unfortunately it isn't. It's still slightly faster though due to ALU call specialization.
+
+The original **interpreted** core remains available with `--cpu-core interpreted`:
+
+You can select the core at runtime via:
+
+```
+xtce-blue --cpu-core generated --cpu-model 8088
+xtce-blue --cpu-core interpreted --cpu-model 8088
+```
 
 ## Known issues
 

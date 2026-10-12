@@ -49,7 +49,7 @@ static constexpr std::array<uint64_t, 256> makeCga8BitTable() {
     for (uint16_t glyph = 0; glyph < 256; ++glyph) {
         uint64_t glyph_u64 = 0;
         for (uint8_t bit = 0; bit < 8; ++bit) {
-            bool bit_val = glyph & (0x01 << (7 - bit));
+            const bool bit_val = glyph & (0x01 << (7 - bit));
             glyph_u64 |= (static_cast<uint64_t>(bit_val ? 0xFF : 0x00) << (bit * 8));
         }
         table[glyph] = glyph_u64;
@@ -66,7 +66,7 @@ constexpr std::array<std::array<uint64_t, 8>, 256> makeCgaHiresGlyphTable() {
             uint64_t glyph_u64 = 0;
 
             for (int bit = 0; bit < 8; ++bit) {
-                size_t glyph_offset = CGA_NORMAL_FONT_OFFSET + glyph * 8 + row;
+                const size_t glyph_offset = CGA_NORMAL_FONT_OFFSET + glyph * 8 + row;
                 bool bit_val = (CGA_FONT_ROM[glyph_offset] & (0x01 << (7 - bit))) != 0;
 
                 if (bit_val) {
@@ -369,46 +369,30 @@ public:
     }
 
     void tick() {
-        ticks_++;
+        ++ticks_;
         if ((ticks_ & char_clock_mask_) == 0) {
-            if (clock_divisor_ == 2) {
-                tick_lchar();
-            }
-            else {
-                tick_hchar();
-            }
-
-            const bool was_hsync = crtc_.hsync();
-            const bool was_vsync = crtc_.vsync();
-            auto [status, vma] = crtc_.tick();
-            vma_ = vma;
-
-            if (!was_vsync && status->vsync) {
-                ++crtc_vsync_starts_;
-            }
-
-            // CRTC sync outputs are levels. Keep XTCE's monitor flyback timing
-            // here, outside the CRTC, and trigger each flyback only once.
-            if (was_vsync && !status->vsync) {
-                ++crtc_vsync_ends_;
-                monitor_vsync_pending_ = true;
-            }
-            if (monitor_hsync_countdown_ != 0 && --monitor_hsync_countdown_ == 0) {
-                if (monitor_vsync_pending_) {
-                    monitor_vsync_pending_ = false;
-                    vsync();
-                }
-                hsync();
-            }
-            if (!was_hsync && status->hsync) {
-                const uint8_t width = crtc_.get_registers()[3] & 0x0F;
-                const uint8_t monitor_width = clock_divisor_ == 1 ? 10 : 5;
-                monitor_hsync_countdown_ = std::min<uint8_t>(width == 0 ? 16 : width, monitor_width);
-            }
-            fetch_char();
-            updateClock();
+            tickCharacter();
         }
         cga_phase_ = (cga_phase_ + 3) & 0x0f;
+    }
+
+    // Three consecutive master clocks per CPU clock. There can be at most
+    // one character boundary: characters take either 8 or 16 clocks.
+    void tick3() {
+        const auto distance = char_clock_mask_ + 1 - (ticks_ & char_clock_mask_);
+        if (distance <= 3) {
+            ticks_ += distance;
+            // Character processing sees the phase before its clock completes.
+            // Deferred clock changes must see the exact character boundary.
+            cga_phase_ = (cga_phase_ + 3 * (distance - 1)) & 0x0f;
+            tickCharacter();
+            ticks_ += 3 - distance;
+            cga_phase_ = (cga_phase_ + 3 * (4 - distance)) & 0x0f;
+        }
+        else {
+            ticks_ += 3;
+            cga_phase_ = (cga_phase_ + 9) & 0x0f;
+        }
     }
 
     static std::string getRegisterName(const int reg) {
@@ -455,6 +439,47 @@ public:
     }
 
 private:
+    friend struct CgaTestAccess;
+
+    void tickCharacter() {
+        if (clock_divisor_ == 2) {
+            tick_lchar();
+        }
+        else {
+            tick_hchar();
+        }
+
+        const bool was_hsync = crtc_.hsync();
+        const bool was_vsync = crtc_.vsync();
+        auto [status, vma] = crtc_.tick();
+        vma_ = vma;
+
+        if (!was_vsync && status->vsync) {
+            ++crtc_vsync_starts_;
+        }
+
+        // CRTC sync outputs are levels. Keep XTCE's monitor flyback timing
+        // here, outside the CRTC, and trigger each flyback only once.
+        if (was_vsync && !status->vsync) {
+            ++crtc_vsync_ends_;
+            monitor_vsync_pending_ = true;
+        }
+        if (monitor_hsync_countdown_ != 0 && --monitor_hsync_countdown_ == 0) {
+            if (monitor_vsync_pending_) {
+                monitor_vsync_pending_ = false;
+                vsync();
+            }
+            hsync();
+        }
+        if (!was_hsync && status->hsync) {
+            const uint8_t width = crtc_.get_registers()[3] & 0x0F;
+            const uint8_t monitor_width = clock_divisor_ == 1 ? 10 : 5;
+            monitor_hsync_countdown_ = std::min<uint8_t>(width == 0 ? 16 : width, monitor_width);
+        }
+        fetch_char();
+        updateClock();
+    }
+
     void updateMode();
     void updatePalette();
     void updateClock();
@@ -689,10 +714,10 @@ private:
         }
         else if (mode_enable_) {
             // Get the two u64 glyph row components to draw for the current fg and bg colors and character row (vlc)
-            const auto rows = get_lchar_glyph_rows(cur_char_, crtc_.vlc());
+            const auto [b0, b1] = get_lchar_glyph_rows(cur_char_, crtc_.vlc());
             const auto frame_u64 = reinterpret_cast<uint64_t*>(buf_[back_buf_]);
-            frame_u64[rba_ >> 3] = rows.first;
-            frame_u64[(rba_ >> 3) + 1] = rows.second;
+            frame_u64[rba_ >> 3] = b0;
+            frame_u64[(rba_ >> 3) + 1] = b1;
         }
         else {
             // When mode bit is disabled in text mode, the CGA acts like VRAM is all 0.
@@ -731,12 +756,12 @@ private:
     /// Draw a single character column in high resolution graphics mode (640x200)
     // ReSharper disable once CppMemberFunctionMayBeConst
     void draw_hires_gfx_mode_char() {
-        auto base_addr = get_gfx_addr(crtc_.vlc());
+        const auto base_addr = get_gfx_addr(crtc_.vlc());
         const auto frame_u64 = reinterpret_cast<uint64_t*>(buf_[back_buf_]);
 
         if (mode_enable_) {
-            auto byte0 = vram_[base_addr];
-            auto byte1 = vram_[base_addr + 1];
+            const auto byte0 = vram_[base_addr];
+            const auto byte1 = vram_[base_addr + 1];
 
             frame_u64[rba_ >> 3] = CGA_HIRES_GFX_TABLE[cc_alt_color_][byte0];
             frame_u64[(rba_ >> 3) + 1] = CGA_HIRES_GFX_TABLE[cc_alt_color_][byte1];

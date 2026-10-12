@@ -3,5 +3,6 @@
 #pragma once
 
 #include <SDL3/SDL_init.h>
+#include "core/CpuSelection.h"
 
-SDL_AppResult runBenchmark();
+SDL_AppResult runBenchmark(CpuSelection selection = {});

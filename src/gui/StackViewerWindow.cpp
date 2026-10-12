@@ -1,6 +1,5 @@
 #include "StackViewerWindow.h"
 #include "../core/Machine.h"
-#include "../core/Cpu.h"
 #include <cmath>
 
 void StackViewerWindow::show(bool *open) {
@@ -76,9 +75,13 @@ void StackViewerWindow::show(bool *open) {
         }
     } else {
         // decrement cooldown if set
-        if (_interactionCooldownFrames > 0) _interactionCooldownFrames -= 1;
+        if (_interactionCooldownFrames > 0) {
+            _interactionCooldownFrames -= 1;
+        }
         // No user move this frame: if we're at bottom, ensure follow is enabled; otherwise leave manual state alone.
-        if (is_at_bottom_now) _userScrolledUp = false;
+        if (is_at_bottom_now) {
+            _userScrolledUp = false;
+        }
     }
 
     // Auto-follow enabled when not in manual inspection mode and cooldown expired

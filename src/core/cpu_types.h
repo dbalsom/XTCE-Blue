@@ -8,6 +8,30 @@
 // ReSharper disable once CppUnusedIncludeDirective
 #include <cstdint>
 
+// Physical S2:S0 bus-status encoding, shared by CPU, bus and logging code.
+enum class BusStatus : std::uint8_t
+{
+    InterruptAcknowledge = 0,
+    IoRead = 1,
+    IoWrite = 2,
+    Halt = 3,
+    InstructionFetch = 4,
+    MemoryRead = 5,
+    MemoryWrite = 6,
+    Passive = 7,
+};
+
+// CPU bus-cycle states.
+enum class TState : std::uint8_t
+{
+    TIdle = 0,
+    T1 = 1,
+    T2 = 2,
+    T3 = 3,
+    T4 = 4,
+    TWait = 5,
+};
+
 enum class Register : std::size_t
 {
     ES,
@@ -58,19 +82,10 @@ enum class QueueReadState
 // Status values use the physical S2:S0 and S4:S3 encodings, not MOO encodings.
 struct CpuBusCycle
 {
-    enum class Phase : std::uint8_t
-    {
-        Idle,
-        T1,
-        T2,
-        T3,
-        T4,
-        Wait
-    };
-    Phase phase = Phase::Idle;
+    TState phase = TState::TIdle;
     bool ale = false;
     std::uint32_t address = 0; // latched address; valid for comparison when ALE is asserted
-    std::uint8_t bus_status = 7;
+    std::uint8_t bus_status = static_cast<std::uint8_t>(BusStatus::Passive);
     std::uint8_t segment_status = 4; // 4 means no segment status in this phase
     std::uint8_t memory_status = 0; // asserted MRDC, AMWC, MWTC, in bits 2, 1, 0
     std::uint8_t io_status = 0; // asserted IORC, AIOWC, IOWC, in bits 2, 1, 0

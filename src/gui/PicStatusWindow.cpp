@@ -22,8 +22,9 @@ static void draw_led_table_row(const char* label, uint8_t value) {
         const float btnSize = 18.0f;
         ImVec2 avail = ImGui::GetContentRegionAvail();
         float pad = (avail.x - btnSize) * 0.5f;
-        if (pad > 0.0f)
+        if (pad > 0.0f) {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pad);
+        }
 
         ImGui::PushID((label[0] << 8) ^ (col));
         ImGui::PushStyleColor(ImGuiCol_Button, on ? onColor : offColor);
@@ -82,8 +83,9 @@ void PicStatusWindow::show(bool* open) {
             ImVec2 txtSize = ImGui::CalcTextSize(std::to_string(i).c_str());
             ImVec2 avail = ImGui::GetContentRegionAvail();
             float pad = (avail.x - txtSize.x) * 0.5f;
-            if (pad > 0.0f)
+            if (pad > 0.0f) {
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pad);
+            }
             ImGui::TextUnformatted(std::to_string(i).c_str());
         }
 
