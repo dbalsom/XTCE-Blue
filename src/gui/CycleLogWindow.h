@@ -22,6 +22,8 @@ public:
 private:
     Machine* _machine{nullptr};
     bool _autoScroll{true};
+    bool show_main_text_{true};
+    bool show_microcode_{true};
     int _capacityUI{10000};
     std::optional<uint64_t> _lastSeenRevision;
     std::string _lineBuffer;

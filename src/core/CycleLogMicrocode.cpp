@@ -13,18 +13,23 @@ std::string_view CycleLogMicrocode::disassembly(uint16_t address, bool is8086) {
     return description ? std::string_view(description) : std::string_view{};
 }
 
-size_t CycleLogMicrocode::formattedSize(const CycleLogEntry& entry, std::string_view description) {
+size_t CycleLogMicrocode::formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text) {
+    const size_t text_size = include_text ? entry.text.size() : 0;
     if (!entry.microcode || description.empty()) {
-        return entry.text.size();
+        return text_size;
     }
     constexpr size_t suffix_size =
         sizeof("  000000000.0000 alu_CF: 0 CF: 0 tA: 0000 tB: 0000 tC: 0000 wordSize: 8") - 1;
-    return entry.text.size() + description.size() + suffix_size + (entry.microcode->word_size ? 1 : 0);
+    return text_size + description.size() + suffix_size + (entry.microcode->word_size ? 1 : 0);
 }
 
-void CycleLogMicrocode::format(const CycleLogEntry& entry, std::string_view description, std::string& line) {
-    line.reserve(formattedSize(entry, description));
-    line.assign(entry.text);
+void CycleLogMicrocode::format(const CycleLogEntry& entry, std::string_view description, std::string& line,
+                              bool include_text) {
+    line.reserve(formattedSize(entry, description, include_text));
+    line.clear();
+    if (include_text) {
+        line.assign(entry.text);
+    }
     if (!entry.microcode || description.empty()) {
         return;
     }

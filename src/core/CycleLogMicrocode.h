@@ -30,6 +30,8 @@ class CycleLogMicrocode {
 public:
     // Views refer to static ROM descriptions and remain valid after CPU reset.
     static std::string_view disassembly(uint16_t address, bool is8086 = false);
-    static size_t formattedSize(const CycleLogEntry& entry, std::string_view description);
-    static void format(const CycleLogEntry& entry, std::string_view description, std::string& line);
+    // An empty description hides microcode; include_text controls the main log text.
+    static size_t formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text = true);
+    static void format(const CycleLogEntry& entry, std::string_view description, std::string& line,
+                       bool include_text = true);
 };
