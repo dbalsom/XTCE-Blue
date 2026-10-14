@@ -25,13 +25,7 @@ namespace marty::intel
 
 using PrefetchQueue = ::cpu::PrefetchQueue<6>;
 
-enum class QueueReadState
-{
-    NoOperation = 0,
-    FirstByte = 1,
-    Flush = 2,
-    SubsequentByte = 3
-};
+using ::QueueReadState;
 
 // Concrete clocked EU, ALU, instruction loader, and model-selected BIU.
 class GeneratedCpu final : public ::cpu::ExecutionControl
@@ -818,7 +812,7 @@ public:
 
         uint8_t value = queue.front();
         if (kind == QueueReadState::SubsequentByte && in_instruction_) {
-            checkSoftwareInterrupt(opcode_, value);
+            checkSoftwareInterruptBreakpoint(opcode_, value);
         }
         queue.pop_front();
         dequeueing_ = true;
@@ -907,6 +901,7 @@ private:
     bool io_requested_ = false, prefetching_ = true, flushing_ = false;
     bool t4_ = false, t5_ = false, t6_ = false, queue_filled_ = false, dequeueing_ = false;
     bool lock_ = false, locking_ = false, read_prefix_ = false;
+    bool interrupt_lock_ = false;
     bool started_ = false, next_instruction_ = false;
     bool ready_ = true, intr_line_ = false, nmi_line_ = false, nmi_pending_ = false;
     bool boundary_checked_ = false, trap_ = false, intr_shadow_ = false, all_shadow_ = false;
@@ -1358,13 +1353,20 @@ private:
                     address_bus_ = (address_bus_ & 0x0ffff) | (seg << 16) | (flags() & 0x200 ? 0x40000 : 0);
 
                     if (writing) {
+                        // Supply the motherboard converter before sampling
+                        // READY in T3; the CPU write completes in T4 as usual.
+                        host.driveWriteData(io_write_);
                         const uint16_t pins =
                             is8086() && (io_address_ & 1) ? uint16_t((io_write_ << 8) | (io_write_ >> 8)) : io_write_;
                         address_bus_ = (address_bus_ & (is8086() ? 0xf0000 : 0xfff00)) | pins;
                     }
 
                     if (bus_status_ == BusStatus::InterruptAcknowledge) {
-                        host.setLock(eu_ == FirstDone);
+                        // The 8086 requests each INTA cycle separately; the
+                        // 8088 splits one request. Track the pair independently
+                        // of the EU's first/second byte state on either model.
+                        interrupt_lock_ = !interrupt_lock_;
+                        host.setLock(interrupt_lock_);
                     }
                     nextBus = TState::T3;
                     break;
@@ -1592,7 +1594,7 @@ private:
         }
 
         if constexpr (Capture) {
-            snapshot->lock = lock_;
+            snapshot->lock = lock_ || interrupt_lock_;
             snapshot->nextBus = nextBus;
             snapshot->nextIoType = static_cast<uint8_t>(bus_status_);
             snapshot->interruptFlag = (flags() & 0x200) != 0;

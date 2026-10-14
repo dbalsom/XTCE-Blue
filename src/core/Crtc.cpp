@@ -160,7 +160,6 @@ void Crtc6845::write_register(const uint8_t byte) {
 
                 cursor_start_line_ = static_cast<uint8_t>(byte & CURSOR_LINE_MASK);
 
-                // IMPORTANT: parentheses — we want (byte & mask) >> 4
                 const uint8_t attr = static_cast<uint8_t>((byte & CURSOR_ATTR_MASK) >> 5);
                 switch (attr) {
                     case 0b00:
@@ -362,6 +361,7 @@ std::pair<const Crtc6845::CrtcStatusBits*, uint16_t> Crtc6845::tick() {
             vlc_c9_ = 0;
             // C4 must reach 128 after R4=127. Frame management resets it;
             // masking to seven bits here makes the following comparisons wrong.
+            // This should be refactored at some point because the physical register is verified 7 bits
             ++vcc_c4_;
             // Set vma to starting position for next character row
             vma_ = vma_t_;

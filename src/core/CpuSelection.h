@@ -92,8 +92,7 @@ inline void validateMachineCpu(CpuSelection selection) {
     if (cpuFamily(selection.model) == CpuFamily::Nec && selection.execution == CpuExecution::Interpreted) {
         throw std::invalid_argument("NEC V20/V30 support is generated only; no interpreted NEC core is planned");
     }
-    if (selection.model != CpuModel::Intel8088) {
-        throw std::invalid_argument(cpuSelectionId(selection) +
-            " is not available in this XTCE machine. Available: interpreted-8088, generated-8088");
+    if (selection.model == CpuModel::Intel8086 && selection.execution == CpuExecution::Interpreted) {
+        throw std::invalid_argument("8086 machine support requires --cpu-core generated");
     }
 }

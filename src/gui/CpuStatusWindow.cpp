@@ -130,8 +130,9 @@ void CpuStatusWindow::show(bool* open) {
 
             ImGui::Separator();
 
-            // Flag names for 8088/8086 (bits 0..15). Bits not defined on 8088 are labeled RES (reserved).
-            static constexpr const char* flag_names[16] = {
+            // NEC CPUs use bit 15 as MF: set for native mode, clear for 8080 emulation.
+            const bool is_nec = cpuFamily(_machine->getCpuSelection().model) == CpuFamily::Nec;
+            const char* const flag_names[16] = {
                 "CF", // 0
                 "1", // 1 (reserved/always 1 on some implementations)
                 "PF", // 2
@@ -147,7 +148,7 @@ void CpuStatusWindow::show(bool* open) {
                 "RES", // 12
                 "RES", // 13
                 "RES", // 14
-                "RES" // 15
+                is_nec ? "MF" : "RES" // 15
             };
 
             // FLAGS display: show hex value and a styled 16-bit flag breakdown
@@ -243,6 +244,9 @@ void CpuStatusWindow::show(bool* open) {
             ImGui::Separator();
             ImGui::Columns(1, nullptr, false);
             ImGui::Text("CPU: %s", _machine->getCpuName().c_str());
+            if (is_nec) {
+                ImGui::Text("Mode: %s", (flags & 0x8000) ? "Native" : "8080 emulation");
+            }
             ImGui::Text("Microcode State: %s", _machine->getExecutionState());
 
             ImGui::Separator();

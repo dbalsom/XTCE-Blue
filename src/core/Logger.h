@@ -20,6 +20,14 @@ public:
     void reset();
     void beginLogging();
     void advance(QueueReadState queueStatus, uint8_t queueByte);
+    // Cores with captured bus phases can supply them instead of inferring Intel timing.
+    void setCpuCycle(const CpuBusCycle& cycle, uint32_t multiplexed, bool ready);
+    void setDisassemblyEnabled(bool enabled);
+
+    std::string getLine(std::span<const uint8_t> queue, QueueReadState queueStatus, uint8_t queueByte,
+                        std::size_t visibleCapacity) {
+        return getLineData(queue, visibleCapacity, queueStatus, queueByte);
+    }
 
     template<class Queue>
     std::string getLine(const Queue& queue, QueueReadState queueStatus, uint8_t queueByte,
@@ -112,7 +120,14 @@ public:
     }
 
     void setPITBits(int bits) { bus_pit_ = bits; }
-    void setAEN(bool aen) { bus_aen_ = aen; }
+    void setAEN(bool aen) {
+        if (explicit_t_state_ && aen != bus_aen_) {
+            // CPU and DMA strobes belong to different bus owners.
+            bus_ior_ = bus_iow_ = bus_memr_ = bus_memw_ = false;
+            d_ = -1;
+        }
+        bus_aen_ = aen;
+    }
     void setDMA(uint8_t dma) { bus_dma_ = dma; }
     void setReady(bool ready) { cpu_ready_ = ready; }
     void setLock(bool lock) { cpu_lock_ = lock; }
@@ -134,6 +149,8 @@ private:
     Disassembler disassembler_;
     std::string disassembly_;
     bool disassembly_synced_{false};
+    bool disassembly_enabled_{true};
+    bool explicit_t_state_{false};
 
     // Internal variables that we use to keep track of what's going on in order
     // to be able to print useful logs.

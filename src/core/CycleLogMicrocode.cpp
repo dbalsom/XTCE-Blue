@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "CycleLogMicrocode.h"
 
+#include <algorithm>
 #include <format>
 #include <iterator>
 
@@ -13,19 +14,21 @@ std::string_view CycleLogMicrocode::disassembly(uint16_t address, bool is8086) {
     return description ? std::string_view(description) : std::string_view{};
 }
 
-size_t CycleLogMicrocode::formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text) {
+size_t CycleLogMicrocode::formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text,
+                                      size_t description_width) {
     const size_t text_size = include_text ? entry.text.size() : 0;
     if (!entry.microcode || description.empty()) {
         return text_size;
     }
     constexpr size_t suffix_size =
         sizeof("  000000000.0000 alu_CF: 0 CF: 0 tA: 0000 tB: 0000 tC: 0000 wordSize: 8") - 1;
-    return text_size + description.size() + suffix_size + (entry.microcode->word_size ? 1 : 0);
+    return text_size + std::max(description.size(), description_width) + suffix_size + (entry.microcode->word_size ? 1 : 0)
+        + entry.microcode->address_width - 13;
 }
 
 void CycleLogMicrocode::format(const CycleLogEntry& entry, std::string_view description, std::string& line,
-                              bool include_text) {
-    line.reserve(formattedSize(entry, description, include_text));
+                              bool include_text, size_t description_width) {
+    line.reserve(formattedSize(entry, description, include_text, description_width));
     line.clear();
     if (include_text) {
         line.assign(entry.text);
@@ -35,8 +38,11 @@ void CycleLogMicrocode::format(const CycleLogEntry& entry, std::string_view desc
     }
     const auto& state = *entry.microcode;
     line += description;
+    if (description.size() < description_width) {
+        line.append(description_width - description.size(), ' ');
+    }
     line += "  ";
-    for (int bit = 12; bit >= 0; --bit) {
+    for (int bit = state.address_width - 1; bit >= 0; --bit) {
         line += (state.address & (1 << bit)) ? '1' : '0';
         if (bit == 4) {
             line += '.';

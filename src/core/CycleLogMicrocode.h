@@ -6,7 +6,8 @@
 #include <string>
 #include <string_view>
 
-struct CycleLogMicrocodeState {
+struct CycleLogMicrocodeState
+{
     // Logical microcode address; the description lookup resolves the ROM word.
     uint16_t address = 0;
     bool alu_carry = false;
@@ -15,23 +16,25 @@ struct CycleLogMicrocodeState {
     uint16_t tmpb = 0;
     uint16_t tmpc = 0;
     bool word_size = false;
+    uint8_t address_width = 13;
 
     bool operator==(const CycleLogMicrocodeState&) const = default;
 };
 
-struct CycleLogEntry {
+struct CycleLogEntry
+{
     std::string text;
     std::optional<CycleLogMicrocodeState> microcode;
 
     bool operator==(const CycleLogEntry&) const = default;
 };
 
-class CycleLogMicrocode {
+class CycleLogMicrocode
+{
 public:
-    // Views refer to static ROM descriptions and remain valid after CPU reset.
     static std::string_view disassembly(uint16_t address, bool is8086 = false);
-    // An empty description hides microcode; include_text controls the main log text.
-    static size_t formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text = true);
+    static size_t formattedSize(const CycleLogEntry& entry, std::string_view description, bool include_text = true,
+                                size_t description_width = 0);
     static void format(const CycleLogEntry& entry, std::string_view description, std::string& line,
-                       bool include_text = true);
+                       bool include_text = true, size_t description_width = 0);
 };

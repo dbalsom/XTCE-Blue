@@ -84,6 +84,7 @@ static std::string printFlagDiff(uint16_t expected, uint16_t actual) {
 bool TestRunner::runAllTests(size_t max_tests) {
 
     std::cout << "CPU: " << cpuSelectionName(selection_) << "\n";
+    std::cout << "Validation: " << (cycle_validation_ ? "cycles" : "architecture") << "\n";
     bool all_ok = !files_.empty();
     for (const auto& filepath : files_) {
         if (!runTestFile(filepath, max_tests)) {
@@ -112,20 +113,36 @@ bool TestRunner::runTestFile(const std::filesystem::path& filepath, size_t max_t
     std::cout << "CPU: " << header.cpu_name << "\n";
     std::cout << "Test Count: " << header.test_count << "\n";
 
-    if (header.cpu_type != Moo::Reader::CPU8088) {
+    const auto expected_model = selection_.model == CpuModel::NecV20 ? Moo::Reader::CPUV20 :
+        selection_.model == CpuModel::NecV30 ? Moo::Reader::CPUV30 :
+        selection_.model == CpuModel::Intel8086 ? Moo::Reader::CPU8086 : Moo::Reader::CPU8088;
+    if (header.cpu_type != expected_model) {
         std::cerr << "SST file model does not match selected " << cpuSelectionId(selection_) << '\n';
         return false;
     }
     ++total_files_run_;
-    if (selection_.execution == CpuExecution::Generated) {
-        return runCases<xtce::generated::Cpu<StubBus>>(reader, filepath, max_tests);
+    if (cpuFamily(selection_.model) == CpuFamily::Nec) {
+        return runCases<NecCpu>(reader, filepath, max_tests);
     }
-    return runCases<Cpu<StubBus>>(reader, filepath, max_tests);
+    if (selection_.execution == CpuExecution::Generated) {
+        return runCases<xtce::generated::Cpu<SstBus>>(reader, filepath, max_tests);
+    }
+    return runCases<Cpu<SstBus>>(reader, filepath, max_tests);
 }
 
 template<class CpuType>
 bool TestRunner::runCases(Moo::Reader& reader, const std::filesystem::path& filepath, size_t max_tests) {
-    CpuType cpu;
+    CpuType cpu = [&]() {
+        if constexpr (std::is_same_v<CpuType, NecCpu>) {
+            using Model = marty::nec::GeneratedCpu::Model;
+            return CpuType(selection_.model == CpuModel::NecV30 ? Model::V30 : Model::V20, true);
+        } else if constexpr (std::is_same_v<CpuType, xtce::generated::Cpu<SstBus>>) {
+            using Model = marty::intel::GeneratedCpu::Model;
+            return CpuType(selection_.model == CpuModel::Intel8086 ? Model::Intel8086 : Model::Intel8088);
+        } else {
+            return CpuType{};
+        }
+    }();
     bool file_ok = true;
     // Run up to max_tests for this file (if max_tests == 0, run all)
     size_t per_file_count = 0;
@@ -166,9 +183,10 @@ bool TestRunner::runTest(CpuType& cpu, const Moo::Reader::Test& test, const std:
     const auto prefetched = std::min(test.bytes.size(), test.init_state.queue.bytes.size());
 
     cpu.getBus()->setInstructionFetchBytes(test.bytes.size() - prefetched);
-    if constexpr (std::is_same_v<CpuType, xtce::generated::Cpu<StubBus>>) {
+    if constexpr (std::is_same_v<CpuType, xtce::generated::Cpu<SstBus>> || std::is_same_v<CpuType, NecCpu>) {
         cpu.getBus()->setInstructionStream(test.bytes, prefetched);
     }
+    cpu.getBus()->capture = true;
     cpu.setPrefetchQueue(test.init_state.queue.bytes);
     cpu.setBusCycleCapture(true);
 
@@ -185,10 +203,18 @@ bool TestRunner::runTest(CpuType& cpu, const Moo::Reader::Test& test, const std:
 
     const auto step = runSingleStepObserved(cpu, test.bytes.size(), [&](int) { trace.push_back(cpu.getBusCycle()); });
 
-    auto [timing, bus, queue] = compareSstTrace(test.cycles, trace);
+    const bool word_bus = selection_.model == CpuModel::NecV30 || selection_.model == CpuModel::Intel8086;
+    auto [timing, bus, queue] = compareSstTrace(test.cycles, trace, word_bus);
     if (test.cycles.empty()) {
         timing = "SST has no cycle trace to validate";
     }
+    if (!cycle_validation_) {
+        timing.clear();
+        bus.clear();
+        queue.clear();
+    }
+    const auto accesses = compareSstAccesses(test.cycles, cpu.getBus()->accesses, word_bus);
+    if (!accesses.empty()) { bus = accesses; }
 
     bool reg_failed = false;
     bool ip_failed = false;

@@ -84,13 +84,14 @@ struct CpuBusCycle
 {
     TState phase = TState::TIdle;
     bool ale = false;
+    bool bhe = false; // Active-low upper-byte enable, used by V30/8086 hosts.
     std::uint32_t address = 0; // latched address; valid for comparison when ALE is asserted
     std::uint8_t bus_status = static_cast<std::uint8_t>(BusStatus::Passive);
     std::uint8_t segment_status = 4; // 4 means no segment status in this phase
     std::uint8_t memory_status = 0; // asserted MRDC, AMWC, MWTC, in bits 2, 1, 0
     std::uint8_t io_status = 0; // asserted IORC, AIOWC, IOWC, in bits 2, 1, 0
     bool data_valid = false;
-    std::uint8_t data = 0;
+    std::uint16_t data = 0;
     QueueReadState queue_status = QueueReadState::NoOperation;
     std::uint8_t queue_byte = 0;
 };

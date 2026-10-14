@@ -83,12 +83,14 @@ public:
     }
 
     // Memory wraps at 20 bits; I/O addresses at 16.
-    void startAccess(uint32_t a, BusStatus bus_status) {
+    void startAccess(uint32_t a, BusStatus bus_status, unsigned width = 1) {
+        assert(width == 1 || width == 2);
         address = a;
         this->bus_status = bus_status;
     }
 
     bool ready() const { return true; }
+    void driveWriteData(uint16_t) {}
     [[nodiscard]] bool interruptPending() const {
         if constexpr (TrackActivity) {
             return this->irq;
@@ -157,6 +159,27 @@ public:
             if (this->capture) {
                 this->accesses.push_back({byteAddress(lane), value, true, bus_status == BusStatus::IoWrite});
             }
+        }
+    }
+
+    // CPU transfer interface, independent of the byte/word test adapter.
+    uint16_t readTransfer(uint32_t a, unsigned width, BusStatus operation) {
+        assert(width == 1 || width == 2);
+        const uint32_t mask = operation == BusStatus::IoRead ? 0xffff : 0xfffff;
+        uint16_t value = 0;
+        for (unsigned lane = 0; lane < width; ++lane) {
+            startAccess((a + lane) & mask, operation);
+            value |= uint16_t(readByte()) << (8 * lane);
+        }
+        return value;
+    }
+
+    void writeTransfer(uint32_t a, uint16_t value, unsigned width, BusStatus operation) {
+        assert(width == 1 || width == 2);
+        const uint32_t mask = operation == BusStatus::IoWrite ? 0xffff : 0xfffff;
+        for (unsigned lane = 0; lane < width; ++lane) {
+            startAccess((a + lane) & mask, operation);
+            writeByte(uint8_t(value >> (8 * lane)));
         }
     }
 

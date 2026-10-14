@@ -25,6 +25,8 @@ void Logger::reset() {
     cpu_status_ = BusStatus::Passive;
     cpu_bus_address_ = 0;
     saved_cpu_address_ = 0;
+    explicit_t_state_ = false;
+    disassembly_enabled_ = true;
 
     beginLogging();
 }
@@ -35,9 +37,49 @@ void Logger::beginLogging() {
     disassembly_synced_ = false;
 }
 
+void Logger::setDisassemblyEnabled(bool enabled) {
+    if (enabled != disassembly_enabled_) {
+        beginLogging();
+        disassembly_enabled_ = enabled;
+    }
+}
+
+void Logger::setCpuCycle(const CpuBusCycle& cycle, uint32_t multiplexed, bool ready) {
+    if (!explicit_t_state_) {
+        bus_ior_ = bus_iow_ = bus_memr_ = bus_memw_ = false;
+    }
+    explicit_t_state_ = true;
+    t_ = static_cast<int>(cycle.phase);
+    t_next_ = cycle.data_valid ? 4 : cycle.phase == TState::T4 ? 0 : t_;
+    cpu_status_ = static_cast<BusStatus>(cycle.bus_status);
+    if (cycle.ale) {
+        setCpuAddress(cycle.address);
+    }
+    if (!bus_aen_) {
+        cpu_address_ = multiplexed & 0xfffff;
+    }
+    bus_ale_ = cycle.ale;
+    cpu_ready_ = ready;
+    if (cycle.phase == TState::T1 || cycle.phase == TState::T2) {
+        last_s_ = cpu_status_;
+    }
+    if (!bus_aen_) {
+        bus_memr_ = (cycle.memory_status & 4) != 0;
+        bus_memw_ = (cycle.memory_status & 3) != 0;
+        bus_ior_ = (cycle.io_status & 4) != 0 && last_s_ != BusStatus::InterruptAcknowledge;
+        bus_iow_ = (cycle.io_status & 3) != 0;
+    }
+    if (cycle.phase == TState::T2 || cycle.phase == TState::T3 || cycle.phase == TState::TWait) {
+        isa_data_floating_ = !(bus_memw_ || bus_iow_ || cycle.data_valid);
+        if (!isa_data_floating_) {
+            bus_data_ = static_cast<uint8_t>(multiplexed);
+        }
+    }
+}
+
 void Logger::advance(QueueReadState queueStatus, uint8_t queueByte) {
     bus_ale_ = false;
-    if (cpu_status_ != BusStatus::Passive && cpu_status_ != BusStatus::Halt) {
+    if (!explicit_t_state_ && cpu_status_ != BusStatus::Passive && cpu_status_ != BusStatus::Halt) {
         switch (t_next_) {
             case 0:
             case 4: t_next_ = 1; break;
@@ -45,7 +87,7 @@ void Logger::advance(QueueReadState queueStatus, uint8_t queueByte) {
             case 2: t_next_ = 3; break;
             case 3: t_next_ = 5; break;
         }
-    } else {
+    } else if (!explicit_t_state_) {
         switch (t_) {
             case 4: d_ = -1; t_next_ = 0; break;
             case 0: t_next_ = 0; break;
@@ -77,13 +119,15 @@ void Logger::advance(QueueReadState queueStatus, uint8_t queueByte) {
     } else if (queueStatus == QueueReadState::FirstByte) {
         disassembly_synced_ = true;
     }
-    if (disassembly_synced_ &&
+    if (disassembly_enabled_ && disassembly_synced_ &&
         (queueStatus == QueueReadState::FirstByte || queueStatus == QueueReadState::SubsequentByte)) {
         if (!disassembler_.disassemble(queueByte, queueStatus == QueueReadState::FirstByte, disassembly_)) {
             disassembly_.clear();
         }
     }
-    last_s_ = cpu_status_;
+    if (!explicit_t_state_) {
+        last_s_ = cpu_status_;
+    }
     t_ = t_next_;
     if (t_ == 4 || d_ == 4) {
         bus_ior_ = false;
@@ -171,7 +215,7 @@ std::string Logger::getLineData(std::span<const uint8_t> queue, std::size_t queu
         (bus_aen_ ? "D" : ".") + (bus_tc_ ? "T" : ".");
 
     line += "  ";
-    if (cpu_status_ != BusStatus::Passive && cpu_status_ != BusStatus::Halt) {
+    if (!explicit_t_state_ && cpu_status_ != BusStatus::Passive && cpu_status_ != BusStatus::Halt) {
         switch (t_next_) {
             case 0:
             case 4:
@@ -189,7 +233,7 @@ std::string Logger::getLineData(std::span<const uint8_t> queue, std::size_t queu
                 break;
         }
     }
-    else {
+    else if (!explicit_t_state_) {
         switch (t_) {
             case 4:
                 d_ = -1;
@@ -313,7 +357,7 @@ std::string Logger::getLineData(std::span<const uint8_t> queue, std::size_t queu
     else if (queueStatus == QueueReadState::FirstByte) {
         disassembly_synced_ = true;
     }
-    if (disassembly_synced_ &&
+    if (disassembly_enabled_ && disassembly_synced_ &&
         (queueStatus == QueueReadState::FirstByte || queueStatus == QueueReadState::SubsequentByte)) {
         if (!disassembler_.disassemble(queueByte, queueStatus == QueueReadState::FirstByte, disassembly_)) {
             disassembly_ = "";
@@ -345,7 +389,7 @@ std::string Logger::getLineData(std::span<const uint8_t> queue, std::size_t queu
         }
 
         std::string type = "-";
-        if (last_s_ == BusStatus::InterruptAcknowledge) {
+        if (d_ != 4 && last_s_ == BusStatus::InterruptAcknowledge) {
             // Interrupt
             line += hex(bus_data_, 2, false) + " <-i           ";
         }
@@ -399,7 +443,9 @@ std::string Logger::getLineData(std::span<const uint8_t> queue, std::size_t queu
     line.append(disassembly_, 0, kDisassemblyWidth);
     line.resize(kMicrocodeColumn, ' ');
     // Latch last status
-    last_s_ = cpu_status_;
+    if (!explicit_t_state_) {
+        last_s_ = cpu_status_;
+    }
     // Advance T-state
     t_ = t_next_;
     // Reset bus signals at T4

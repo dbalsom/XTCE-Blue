@@ -32,7 +32,7 @@ private:
 
 } // namespace
 
-SDL_AppResult runBenchmark(CpuSelection selection) {
+SDL_AppResult runBenchmark(CpuSelection selection, std::span<const uint8_t> floppy0) {
     constexpr double kCpuHz = 14318180.0 / 3.0;
     constexpr double kMaxVirtualSeconds = 120.0;
     constexpr auto max_cycles = static_cast<uint64_t>(kCpuHz * kMaxVirtualSeconds);
@@ -42,6 +42,9 @@ SDL_AppResult runBenchmark(CpuSelection selection) {
     {
         BenchmarkOutputSilencer silence;
         machine = std::make_unique<Machine>(selection);
+        if (!floppy0.empty()) {
+            machine->getBus()->fdc()->loadDisk(0, {floppy0.begin(), floppy0.end()}, true);
+        }
         machine->setSoftwareInterruptBreakpoint(0x19);
         machine->run();
 

@@ -1048,7 +1048,7 @@ private:
                         return 0;
                     }
                     const uint8_t data = queueRead(QueueReadState::SubsequentByte);
-                    checkSoftwareInterrupt(opcode_, data);
+                    checkSoftwareInterruptBreakpoint(opcode_, data);
                     return data;
                 }
             case 8: // A (AL)
@@ -2152,7 +2152,7 @@ public:
     }
 
 private:
-    using InstructionQueue = cpu::PrefetchQueue<QueueLen>;
+    using PrefetchQueue = cpu::PrefetchQueue<QueueLen>;
 
     class InstructionHistory
     {
@@ -2291,7 +2291,7 @@ private:
     Logger logger_;
 
     uint16_t registers_[32];
-    InstructionQueue prefetch_queue_{};
+    PrefetchQueue prefetch_queue_{};
     int queue_bytes_;
     uint8_t* byte_registers_[8];
     uint8_t microcode_[4 * 512];

@@ -15,13 +15,20 @@
 #include "interpreted_808X/Cpu.h"
 #include "CpuSelection.h"
 #include "generated_808X/Cpu.h"
-#include "StubBus.h"
+#include "generated_VX0/Cpu.h"
+#include "test_support/SstBus.h"
 #include "mooreader.h"
 
 class TestRunner
 {
 public:
-    explicit TestRunner(CpuSelection selection = {}) : selection_(selection) { validateMachineCpu(selection); }
+    explicit TestRunner(CpuSelection selection = {}, std::string_view mode = "auto") : selection_(selection) {
+        validateMachineCpu(selection);
+        if (mode != "auto" && mode != "architecture" && mode != "cycles") {
+            throw std::invalid_argument("Test mode must be auto, architecture or cycles");
+        }
+        cycle_validation_ = mode == "cycles" || (mode == "auto" && cpuFamily(selection.model) == CpuFamily::Intel);
+    }
 
     // Add all files matching .MOO or .MOO.gz from the provided path.
     // If `path` is a directory, it will be traversed recursively.
@@ -65,6 +72,8 @@ public:
 
 private:
     CpuSelection selection_;
+    bool cycle_validation_ = true;
+    using NecCpu = xtce::nec::Cpu<SstBus>;
     bool runTestFile(const std::filesystem::path& filepath, size_t max_tests = 0);
     template<class CpuType> bool runTest(CpuType& cpu, const Moo::Reader::Test& test, const std::filesystem::path& filepath);
     template<class CpuType> bool runCases(Moo::Reader& reader, const std::filesystem::path& filepath, size_t max_tests);

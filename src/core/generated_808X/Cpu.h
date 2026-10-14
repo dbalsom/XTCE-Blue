@@ -22,6 +22,12 @@ namespace xtce::generated
 template <class BusType>
 class Cpu
 {
+    struct Transfer {
+        uint32_t address = 0;
+        unsigned width = 1;
+        BusStatus operation = BusStatus::Passive;
+    };
+
     template <bool Log>
     struct Host;
 
@@ -33,6 +39,9 @@ public:
         uint16_t cs, ip;
         std::string disassembly;
     };
+
+    explicit Cpu(Core::Model model = Core::Model::Intel8088) : core_(model) {}
+    Core::Model model() const { return core_.is8086() ? Core::Model::Intel8086 : Core::Model::Intel8088; }
 
     BusType* getBus() { return &bus_; }
     uint16_t* getRegisters() { return core_.registers_; }
@@ -51,6 +60,7 @@ public:
 
     void reset() {
         core_.reset();
+        transfer_ = {};
         clearCycleLog();
         history_.clear();
         disassembler_.reset();
@@ -67,15 +77,15 @@ public:
     RunResult run_for(int cycles) {
         const auto clocks = static_cast<uint64_t>(std::max(cycles, 0));
         if (!capture_cycles_ && !cycle_logging_ && !history_enabled_) {
-            Host<false> host{bus_};
+            Host<false> host{bus_, transfer_};
             core_.runFor(host, clocks);
         }
         else if (cycle_logging_) {
-            Host<true> host{bus_};
+            Host<true> host{bus_, transfer_};
             runCycleLoop(host, clocks);
         }
         else {
-            Host<false> host{bus_};
+            Host<false> host{bus_, transfer_};
             runCycleLoop(host, clocks);
         }
         return core_.stopReason();
@@ -83,10 +93,10 @@ public:
 
     int stepToNextInstruction() {
         if (cycle_logging_) {
-            Host<true> host{bus_};
+            Host<true> host{bus_, transfer_};
             return stepWithHost(host);
         }
-        Host<false> host{bus_};
+        Host<false> host{bus_, transfer_};
         return stepWithHost(host);
     }
 
@@ -215,14 +225,28 @@ private:
     struct Host
     {
         BusType& bus;
+        Transfer& transfer;
         CycleLogBusSignals signals{};
         void startAccess(uint32_t address, BusStatus bus_status, unsigned width) {
-            assert(width == 1 && "XTCE byte bus requires an 8088");
-            bus.startAccess(address, bus_status);
+            transfer = {address, width, bus_status};
+            bus.startAccess(address, bus_status, width);
         }
         bool ready() { return bus.ready(); }
-        uint16_t read() { return bus.read(); }
-        void write(uint16_t value) { bus.write(static_cast<uint8_t>(value)); }
+        void driveWriteData(uint16_t value) { bus.driveWriteData(value); }
+        uint16_t read() {
+            if (transfer.width == 1 || transfer.operation == BusStatus::InterruptAcknowledge) {
+                return bus.read();
+            }
+            return bus.readTransfer(transfer.address, transfer.width, transfer.operation);
+        }
+        void write(uint16_t value) {
+            if (transfer.width == 1) {
+                bus.write(static_cast<uint8_t>(value));
+            }
+            else {
+                bus.writeTransfer(transfer.address, value, transfer.width, transfer.operation);
+            }
+        }
         void tick() {
             if constexpr (Log) {
                 const bool dma_s3 = bus.getDMAS3();
@@ -275,14 +299,15 @@ private:
             cycle_snapshot_ = {};
             cycle_snapshot_.phase = pins.t;
             cycle_snapshot_.ale = pins.ale;
+            cycle_snapshot_.bhe = pins.bhe;
             cycle_snapshot_.address = pins.address;
             cycle_snapshot_.bus_status = pins.status;
             cycle_snapshot_.segment_status = pins.segment;
             cycle_snapshot_.memory_status = pins.memory;
             cycle_snapshot_.io_status = pins.io;
             cycle_snapshot_.data_valid = (pins.t == TState::T3 || pins.t == TState::TWait) &&
-                static_cast<BusStatus>(pins.status) == BusStatus::Passive;
-            cycle_snapshot_.data = static_cast<uint8_t>(pins.data);
+                pins.ready && static_cast<BusStatus>(pins.status) == BusStatus::Passive;
+            cycle_snapshot_.data = pins.data;
             cycle_snapshot_.queue_status = static_cast<QueueReadState>(pins.queueStatus());
             cycle_snapshot_.queue_byte = pins.queueByte;
         }
@@ -378,7 +403,9 @@ private:
     }
 
     BusType bus_;
-    Core core_{Core::Model::Intel8088};
+    Core core_;
+    // Hosts are recreated between run/step calls; an in-flight bus cycle is not.
+    Transfer transfer_;
 
     // Cycle log stuff
     bool capture_cycles_ = false, cycle_logging_ = false, history_enabled_ = false;

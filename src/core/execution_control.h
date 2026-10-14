@@ -74,7 +74,7 @@ protected:
         }
     }
 
-    void checkSoftwareInterrupt(const int opcode, const uint8_t vector) {
+    void checkSoftwareInterruptBreakpoint(const int opcode, const uint8_t vector) {
         if (opcode == 0xcd && vector == software_interrupt_breakpoint_) {
             breakpoint_hit_ = true;
         }

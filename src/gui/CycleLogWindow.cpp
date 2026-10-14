@@ -1,15 +1,15 @@
 #include "CycleLogWindow.h"
-#include "../core/Machine.h"
-#include "../core/Logger.h"
 #include <string_view>
+#include "../core/Logger.h"
+#include "../core/Machine.h"
 
-namespace {
+namespace
+{
 
 std::string cycleLogHeader() {
     std::string header(Logger::kMicrocodeColumn + sizeof("MICROCODE") - 1, ' ');
-    const auto place = [&](size_t column, std::string_view label) {
-        header.replace(column, label.size(), label.data(), label.size());
-    };
+    const auto place = [&](size_t column, std::string_view label)
+    { header.replace(column, label.size(), label.data(), label.size()); };
 
     place(0, "A");
     place(2, "BUS");
@@ -103,15 +103,23 @@ void CycleLogWindow::show(bool* open) {
     else if (!show_microcode_) {
         header = header.substr(0, Logger::kMicrocodeColumn);
     }
-    const auto description_for = [&](const CycleLogEntry& entry) {
+    const auto description_for = [&](const CycleLogEntry& entry)
+    {
         return show_microcode_ && entry.microcode ? _machine->getMicrocodeDisassembly(entry.microcode->address)
-                                                 : std::string_view{};
+                                                  : std::string_view{};
     };
+    size_t description_width = 0;
+    for (const auto& entry : buf) {
+        description_width = std::max(description_width, description_for(entry).size());
+    }
     size_t longest = header.size();
     for (const auto& entry : buf) {
-        longest = std::max(longest, CycleLogMicrocode::formattedSize(entry, description_for(entry), show_main_text_));
+        longest = std::max(
+            longest,
+            CycleLogMicrocode::formattedSize(entry, description_for(entry), show_main_text_, description_width));
     }
-    // The log uses fixed-width columns. Measuring lengths avoids formatting hidden rows.
+
+    // The log uses fixed-width columns. Measure length of longest content
     const float content_width = longest * ImGui::CalcTextSize("M").x + ImGui::GetStyle().CellPadding.x * 2;
     const ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY;
     if (ImGui::BeginTable("##cyclelog_table", 1, flags, ImVec2(0, 0), content_width)) {
@@ -126,6 +134,7 @@ void CycleLogWindow::show(bool* open) {
 
         const auto revision = _machine->getCycleLogRevision();
         const bool scroll_to_end = _autoScroll && !buf.empty() && revision != _lastSeenRevision;
+
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(buf.size()));
         if (scroll_to_end) {
@@ -135,7 +144,8 @@ void CycleLogWindow::show(bool* open) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
-                CycleLogMicrocode::format(buf[i], description_for(buf[i]), _lineBuffer, show_main_text_);
+                CycleLogMicrocode::format(buf[i], description_for(buf[i]), _lineBuffer, show_main_text_,
+                                          description_width);
                 ImGui::TextUnformatted(_lineBuffer.c_str());
                 if (scroll_to_end && static_cast<size_t>(i) == buf.size() - 1) {
                     ImGui::SetScrollHereY(1.0f);
@@ -148,4 +158,3 @@ void CycleLogWindow::show(bool* open) {
 
     ImGui::End();
 }
-
