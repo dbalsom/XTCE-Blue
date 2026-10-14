@@ -32,7 +32,7 @@ private:
 
 } // namespace
 
-SDL_AppResult runBenchmark() {
+SDL_AppResult runBenchmark(CpuSelection selection, std::span<const uint8_t> floppy0) {
     constexpr double kCpuHz = 14318180.0 / 3.0;
     constexpr double kMaxVirtualSeconds = 120.0;
     constexpr auto max_cycles = static_cast<uint64_t>(kCpuHz * kMaxVirtualSeconds);
@@ -41,8 +41,11 @@ SDL_AppResult runBenchmark() {
     double elapsed_seconds = 0.0;
     {
         BenchmarkOutputSilencer silence;
-        machine = std::make_unique<Machine>();
-        machine->getCpu()->setSoftwareInterruptBreakpoint(0x19);
+        machine = std::make_unique<Machine>(selection);
+        if (!floppy0.empty()) {
+            machine->getBus()->fdc()->loadDisk(0, {floppy0.begin(), floppy0.end()}, true);
+        }
+        machine->setSoftwareInterruptBreakpoint(0x19);
         machine->run();
 
         // Exclude initialization. Run the complete emulated machine without host
@@ -59,12 +62,13 @@ SDL_AppResult runBenchmark() {
 
     const bool reached_bootstrap = machine->breakpointHit();
     const uint64_t cycles = machine->cycleCount();
-    const uint64_t instructions = machine->getCpu()->instructionCount();
+    const uint64_t instructions = machine->instructionCount();
     const uint64_t frames = machine->getBus()->cga()->getDebugState().frame_count;
     const double virtual_seconds = static_cast<double>(cycles) / kCpuHz;
     const double cycles_per_second = elapsed_seconds > 0.0 ? cycles / elapsed_seconds : 0.0;
     const double instructions_per_second = elapsed_seconds > 0.0 ? instructions / elapsed_seconds : 0.0;
 
+    std::printf("CPU: %s\n", cpuSelectionName(selection).c_str());
     std::printf("XTCE-Blue benchmark: %s\n",
                 reached_bootstrap ? "reached BIOS bootstrap (INT 19h)" : "stopped before BIOS bootstrap");
     std::printf("  Wall time:         %.6f s\n", elapsed_seconds);

@@ -116,3 +116,6 @@
 /microcode
 /releases
 imgui.ini
+
+/cmake-build*
+/benchmarks

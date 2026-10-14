@@ -51,10 +51,12 @@ public:
         }
         mode_contrast = 256 / (max_v - min_v);
         mode_brightness = -min_v * mode_contrast;
-        if ((cgamode & 3) == 1)
+        if ((cgamode & 3) == 1) {
             mode_hue = 14;
-        else
+        }
+        else {
             mode_hue = 4;
+        }
 
         mode_contrast *= contrast * (new_cga ? 1.2 : 1) / 100; /* new CGA: 120% */
         mode_brightness += (new_cga ? brightness - 10 : brightness) * 5; /* new CGA: -10 */
@@ -72,8 +74,9 @@ public:
             }
             c = chroma_multiplexer[((lc & 7) << 5) | ((rc & 7) << 2) | phase];
             i = intensity[(left >> 3) | ((right >> 2) & 2)];
-            if (!new_cga)
+            if (!new_cga) {
                 v = c + i;
+            }
             else {
                 double r_ = intensity[((left >> 2) & 1) | ((right >> 1) & 2)];
                 double g_ = intensity[((left >> 1) & 1) | (right & 2)];
@@ -160,8 +163,9 @@ public:
         }
 
         COMPOSITE_OUT(CGA_Composite_Table[((*rgbi & 0x0f) << 6) | (border << 2) | 3]);
-        for (x = 0; x < 5; ++x)
+        for (x = 0; x < 5; ++x) {
             COMPOSITE_OUT(b[x & 3]);
+        }
 
         if ((cgamode & 4) != 0) {
             /* Decode */

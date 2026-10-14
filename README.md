@@ -1,18 +1,11 @@
 # XTCE-Blue
 
-XTCE-Blue is a fork of [reenigne's XTCE 8088 emulator](https://github.com/reenigne/reenigne/tree/master/8088/xtce) providing video emulation, an SDL3 interface and an ImGui-based debugger.
+XTCE-Blue is a cycle-accurate IBM PC emulator with microcode-based, cycle-exact emulation of the Intel 8088 and NEC V20 CPUs.
 
-## About XTCE
+It started as a fork of [reenigne's XTCE 8088 CPU emulation core](https://github.com/reenigne/reenigne/tree/master/8088/xtce)
+providing video emulation, an SDL3 interface and an ImGui-based debugger. Several bugs within XTCE were also fixed.
 
-XTCE is a cycle-interruptable, microcode-interpreting 8088 emulation core. It was developed by the brilliant demo-coder reenigne, 
-one of the programmers behind such amazing demos as [8088 MPH](https://www.youtube.com/watch?v=yHXx3orN35Y) and [Area 5150](https://www.youtube.com/watch?v=fWDxdoRTZPc). 
-He designed it to simulate the operation of his IBM 5160 in a cycle-exact manner, down to each DRAM refresh cycle.
-
-As an author of another cycle-accurate PC emulator, [MartyPC](https://github.com/dbalsom/martypc), I have admired the audacity to execute the 8088's microcode directly, especially since reenigne was the [first person to decode it](https://www.reenigne.org/blog/8086-microcode-disassembled/). 
-
-Unfortunately, the massive technical accomplishment that XTCE represents has been somewhat overlooked considering that XTCE lacks such amenities as a display, floppy disk controller, or even a keyboard. This limits its reach to the most hardcore of retro programmers looking for a powerful research tool.
-
-With reenigne's blessing I aimed to take XTCE and make a fully fleshed out demonstration emulator out of it - and so XTCE-Blue was born.
+It eventually incorporated [my own microcode disassembly](https://github.com/dbalsom/x86_microcode) of the NEC V20 and V30 microcode and research into bus timings.
 
 XTCE-Blue integrates several device implementations ported from [MartyPC](https://github.com/dbalsom/martypc), including its precise, overscan-aware CGA emulation.
 
@@ -20,6 +13,12 @@ XTCE-Blue is the only other PC emulator besides MartyPC that can run the final '
 
 ![8088mph_01](/images/8088mph_01.png)
 ![area5150_01](/images/lake_effect_01.png)
+
+## V20/V30 support
+
+XTCE-Blue now has microcode-based V20 and V30 emulation, the results of the [successful decoding of the NEC V20 microcode](https://martypc.blogspot.com/2026/09/decoding-nec-v20-microcode.html).
+
+8080 emulation mode is supported and has been validated with `8080EXER.COM` against a real V20 CPU.
 
 ## Goals
  - Create a clean, well-commented C++ reference emulator for cycle-accurate emulation of the IBM PC/XT.
@@ -45,12 +44,13 @@ XTCE-Blue is the only other PC emulator besides MartyPC that can run the final '
  - Stack display
  - Instruction disassembly display
  - Video card status display
-
+ - 
 ## Hardware Implementation Status
 
 Currently, XTCE-Blue has emulation of the following devices:
 
- - Intel 8088 CPU
+ - Microcode-based Intel 8088/8086 CPU
+ - Microcode-based NEC V20/V30 CPU
  - Intel 8253 Programmable Interrupt Timer
  - Intel 8259 Programmable Interrupt Controller
  - Intel 8255 Programmable Peripheral Interface
@@ -64,6 +64,42 @@ What it is currently lacking:
  - Serial Port(s)
  - Parallel Ports(s)
  - Game Port
+
+## CPU core selection
+
+The default CPU core is **generated-8088**. The **generated** core compiles Intel microcode
+into a C++ word switch. The hope was that this would be significantly faster than microcode interpretation; 
+unfortunately it isn't. It's still slightly faster though due to ALU call specialization.
+
+The original **interpreted** core from XTCE remains available with `--cpu-core interpreted`:
+
+You can select the core at runtime via:
+
+```
+xtce-blue --cpu-core interpreted --cpu-model 8088 
+xtce-blue --cpu-core generated --cpu-model 8088
+xtce-blue --cpu-core generated --cpu-model 8086
+xtce-blue --cpu-core generated --cpu-model v20
+xtce-blue --cpu-core generated --cpu-model v30
+```
+
+## Single-step tests
+
+XTCE-Blue passes my [8088](https://github.com/SingleStepTests/8088) and [V20](https://github.com/SingleStepTests/v20)
+SingleStepTest CPU test suites, 100%, for every cycle trace, including all undefined flags.
+
+You can run a SST suite with `run-tests --test-path <file-or-directory> --test-max 0`.
+For every CPU core, `--test-mode architecture` checks registers, all FLAGS bits,
+final RAM, and the ordered memory and I/O accesses. `--test-mode cycles` also
+checks clock timing and bus/queue signals.
+
+## Floppy Image mounting
+
+Use `--floppy0` to mount a raw floppy image in drive A: before booting:
+
+```
+xtce-blue --cpu-core generated --cpu-model v20 --floppy0 "path/to/Disk01.img"
+```
 
 ## Known issues
 

@@ -223,8 +223,9 @@ public:
 
     //  * In Write Data op (mem->device), DMAC must call this to supply next byte.
     void dmaDeviceWrite(uint8_t v) {
-        if (op_.kind != OpKind::WriteDMA || bytes_left_ == 0)
+        if (op_.kind != OpKind::WriteDMA || bytes_left_ == 0) {
             return;
+        }
         auto& d = drives_[sel_];
         uint32_t bps = sectorSizeFromN(op_.N);
         size_t off = chsToOffset(d, op_.C, op_.H, op_.S, bps);

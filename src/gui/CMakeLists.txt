@@ -1,0 +1,26 @@
+target_sources(${EXECUTABLE_NAME} PRIVATE
+    CpuStatusWindow.cpp
+    CpuStatusWindow.h
+    CycleLogWindow.cpp
+    CycleLogWindow.h
+    DebuggerManager.cpp
+    DebuggerManager.h
+    DebuggerWindow.h
+    DisassemblyWindow.cpp
+    DisassemblyWindow.h
+    DisplayDebugWindow.cpp
+    DisplayDebugWindow.h
+    DmacStatusWindow.cpp
+    DmacStatusWindow.h
+    imgui_memory_editor.h
+    InstructionHistoryWindow.cpp
+    InstructionHistoryWindow.h
+    MemoryViewerWindow.cpp
+    MemoryViewerWindow.h
+    PicStatusWindow.cpp
+    PicStatusWindow.h
+    StackViewerWindow.cpp
+    StackViewerWindow.h
+    VideoCardStatusWindow.cpp
+    VideoCardStatusWindow.h
+)

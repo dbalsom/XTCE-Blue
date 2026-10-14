@@ -89,10 +89,12 @@ public:
                 // Write Single Mask Register Bit
             {
                 uint8_t b = 1 << (data & 3);
-                if ((data & 4) != 0)
+                if ((data & 4) != 0) {
                     mask_ |= b;
-                else
+                }
+                else {
                     mask_ &= ~b;
+                }
             }
             break;
             case 0x0b:

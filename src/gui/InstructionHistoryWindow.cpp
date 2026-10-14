@@ -12,9 +12,8 @@ void InstructionHistoryWindow::show(bool* open) {
     }
 
     // ReSharper disable once CppDFAUnreachableCode
-    auto* cpu = _machine->getCpu();
     if (!_historyEnabledInitialized) {
-        _historyEnabled = cpu->isLogInstructions();
+        _historyEnabled = _machine->isLogInstructions();
         _historyEnabledInitialized = true;
     }
 
@@ -22,7 +21,7 @@ void InstructionHistoryWindow::show(bool* open) {
 
     // Controls row
     if (ImGui::Checkbox("Enable Instruction History", &_historyEnabled)) {
-        cpu->setLogInstructions(_historyEnabled);
+        _machine->setLogInstructions(_historyEnabled);
     }
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &_autoScroll);
@@ -35,11 +34,12 @@ void InstructionHistoryWindow::show(bool* open) {
 
     // Estimate visible lines; fetch extra (2x) so user can scroll up some distance without refetching.
     size_t visibleLines = static_cast<size_t>(avail.y / line_h);
-    if (visibleLines == 0)
+    if (visibleLines == 0) {
         visibleLines = 1;
+    }
     size_t fetchLines = std::min<size_t>(visibleLines * 2 + 10, 1000); // cap to buffer capacity
 
-    std::vector<Cpu<Bus>::InstructionHistoryEntry> entries = cpu->getHistory(fetchLines);
+    auto entries = _machine->getHistory(fetchLines);
 
     // Display bottom-up: oldest at top, newest at bottom.
     for (int i = static_cast<int>(entries.size()) - 1; i >= 0; --i) {

@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -70,8 +71,12 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
 struct Config
 {
     bool benchmark{false};
+    std::string cpu_core{cpuExecutionName(CpuSelection{}.execution)};
+    std::string cpu_model{cpuModelName(CpuSelection{}.model)};
+    std::string floppy0{};
     std::string test_path{};
     size_t test_max{0};
+    std::string test_mode{"auto"};
     // Expect two-digit hex strings like "00".."FF"
     std::string opcode_start{"00"};
     std::string opcode_end{"FF"};
@@ -371,6 +376,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // Run CLI11 to parse command-line arguments
     CLI::App cli_app{std::format("{} v{}", APP_NAME, APP_VERSION)};
     argv = cli_app.ensure_utf8(argv);
+    cli_app.add_option("--cpu-core", cfg.cpu_core, "CPU execution: interpreted or generated");
+    cli_app.add_option("--cpu-model", cfg.cpu_model, "CPU model: 8088, 8086, v20 or v30 (8086/NEC require generated)");
+    auto* floppy0_option =
+        cli_app.add_option("--floppy0", cfg.floppy0, "Mount a raw floppy image in drive A: (write-protected)")
+            ->check(CLI::ExistingFile);
     auto* benchmark_option =
         cli_app.add_flag("--benchmark", cfg.benchmark,
                          "Run headless and unthrottled until BIOS bootstrap (INT 19h), then print performance stats");
@@ -378,8 +388,13 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     // Create a subcommand 'run-tests' with options for test path and an optional max
     auto* run_test = cli_app.add_subcommand("run-tests", "Run SingleStepTests");
     run_test->excludes(benchmark_option);
+    run_test->excludes(floppy0_option);
     run_test->add_option("--test-path", cfg.test_path, "Path to location of SingleStepTests")->required(false);
     run_test->add_option("--test-max", cfg.test_max, "Maximum number of tests to run (0 = no limit)");
+    run_test
+        ->add_option("--test-mode", cfg.test_mode,
+                     "Validation: auto (Intel cycles, NEC architecture), architecture or cycles")
+        ->check(CLI::IsMember({"auto", "architecture", "cycles"}));
     run_test
         ->add_option(
             "--opcode-start", cfg.opcode_start,
@@ -397,8 +412,33 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
+    CpuSelection cpu_selection;
+    try {
+        cpu_selection = parseCpuSelection(cfg.cpu_core, cfg.cpu_model);
+        validateMachineCpu(cpu_selection);
+    }
+    catch (const std::exception& error) {
+        std::cerr << "CPU selection: " << error.what() << '\n';
+        return SDL_APP_FAILURE;
+    }
+
+    std::vector<uint8_t> floppy0_data;
+    if (!cfg.floppy0.empty()) {
+        const std::filesystem::path image_path(std::u8string(cfg.floppy0.begin(), cfg.floppy0.end()));
+        std::ifstream image(image_path, std::ios::binary);
+        if (!image) {
+            std::cerr << "Cannot open floppy image: " << cfg.floppy0 << '\n';
+            return SDL_APP_FAILURE;
+        }
+        floppy0_data.assign(std::istreambuf_iterator<char>(image), std::istreambuf_iterator<char>());
+        if (image.bad() || floppy0_data.empty()) {
+            std::cerr << "Cannot read floppy image or image is empty: " << cfg.floppy0 << '\n';
+            return SDL_APP_FAILURE;
+        }
+    }
+
     if (cfg.benchmark) {
-        return runBenchmark();
+        return runBenchmark(cpu_selection, floppy0_data);
     }
 
     // If subcommand was invoked, run tests and exit
@@ -406,10 +446,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         // Parse and validate two-digit hex opcode range strings
         auto parse_hex_byte = [&](const std::string& s, int& out) -> bool
         {
-            if (s.size() != 2)
+            if (s.size() != 2) {
                 return false;
-            if (!std::isxdigit(static_cast<unsigned char>(s[0])) || !std::isxdigit(static_cast<unsigned char>(s[1])))
+            }
+            if (!std::isxdigit(static_cast<unsigned char>(s[0])) || !std::isxdigit(static_cast<unsigned char>(s[1]))) {
                 return false;
+            }
             try {
                 out = std::stoi(s, nullptr, 16);
             }
@@ -434,20 +476,30 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             return SDL_APP_FAILURE;
         }
 
-        const auto test_runner = new TestRunner();
+        const auto test_runner = new TestRunner(cpu_selection, cfg.test_mode);
+        const auto has_opcode_prefix = [](const std::string& name)
+        {
+            const auto length = name.find('.');
+            if (length != 2 && length != 4) {
+                return false;
+            }
+            return std::all_of(name.begin(), name.begin() + length, [](unsigned char c) { return std::isxdigit(c); });
+        };
         if (!cfg.test_path.empty()) {
             const std::filesystem::path p(cfg.test_path);
             if (std::filesystem::is_directory(p)) {
                 for (const auto& entry : std::filesystem::directory_iterator(p)) {
-                    if (!entry.is_regular_file())
+                    if (!entry.is_regular_file()) {
                         continue;
+                    }
                     const auto name = entry.path().filename().string();
-                    if (name.size() < 3)
+                    if (name.size() < 3) {
                         continue;
-                    // Expect filename starting with two hex digits followed by a dot, e.g. "00.MOO.gz"
-                    if (!std::isxdigit(static_cast<unsigned char>(name[0])) ||
-                        !std::isxdigit(static_cast<unsigned char>(name[1])) || name[2] != '.')
+                    }
+                    // NEC extended opcodes use four hex digits, e.g. "0F10.MOO.gz".
+                    if (!has_opcode_prefix(name)) {
                         continue;
+                    }
                     int val = 0;
                     try {
                         val = std::stoi(name.substr(0, 2), nullptr, 16);
@@ -462,12 +514,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
             }
             else if (std::filesystem::is_regular_file(p)) {
                 const auto name = p.filename().string();
-                if (name.size() >= 3 && std::isxdigit(static_cast<unsigned char>(name[0])) &&
-                    std::isxdigit(static_cast<unsigned char>(name[1])) && name[2] == '.') {
+                if (has_opcode_prefix(name)) {
                     try {
                         const int val = std::stoi(name.substr(0, 2), nullptr, 16);
-                        if (val >= startVal && val <= endVal)
+                        if (val >= startVal && val <= endVal) {
                             test_runner->addFiles(p.string());
+                        }
                     }
                     catch (...) {
                         /* ignore */
@@ -537,7 +589,10 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     // Create a Machine - this represents our emulator core.
-    auto machine = new Machine();
+    auto machine = new Machine(cpu_selection);
+    if (!floppy0_data.empty()) {
+        machine->getBus()->fdc()->loadDisk(0, floppy0_data, true);
+    }
 
     // Set up our emulator application context.
     auto* ctx = new AppContext();
@@ -707,7 +762,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
     // Advance emulation and see if frames were emitted
     const auto virtual_frames_before = app->machine->getBus()->cga()->getDebugState().frame_count;
+    app->machine->beginCycleLogFrame();
     app->advanceEmulation(now, delta);
+    app->machine->endCycleLogFrame();
     if (const auto virtual_frames_after = app->machine->getBus()->cga()->getDebugState().frame_count;
         virtual_frames_after >= virtual_frames_before) {
         app->virtual_frame_count += virtual_frames_after - virtual_frames_before;
@@ -842,13 +899,19 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             ImGui::Separator();
             ImGui::Text("Version: %s", APP_VERSION);
             ImGui::Text("Authors:");
-            ImGui::BulletText("Andrew Jenner (reenigne) - original XTCE CPU core");
-            ImGui::BulletText("Daniel Balsom (gloriouscow) - SDL3 frontend, CGA implementation");
+            ImGui::BulletText("Andrew Jenner (reenigne) - original XTCE 8088 CPU core");
+            ImGui::BulletText("Daniel Balsom (gloriouscow) - V20/V30 CPU core, SDL3 frontend, everything else");
 
             ImGui::NewLine();
-            ImGui::TextWrapped("XTCE-Blue is a cycle-accurate IBM XT emulator written in C++ using SDL3 and ImGui. "
-                               "XTCE-Blue's 8088 emulation is powered by the XTCE 8088 CPU core - "
-                               "which emulates the 8088 at the microcode level.");
+            ImGui::Text("Special Thanks To:");
+            ImGui::BulletText("InfoSecDJ - for die photography enabling V20 microcode extraction");
+            ImGui::BulletText("dreNorteR - for assisting greatly with V20 microcode disassembly");
+
+            ImGui::NewLine();
+            ImGui::TextWrapped(
+                "XTCE-Blue is a cycle-accurate, microcode-based IBM XT emulator written in C++ using SDL3 and ImGui.");
+            ImGui::Separator();
+            ImGui::Text("CPU: %s", app->machine->getCpuName().c_str());
 
             ImGui::NewLine();
             if (ImGui::Button("OK", ImVec2(120, 0))) {

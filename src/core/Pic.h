@@ -17,6 +17,7 @@ public:
     }
 
     void reset() {
+        selection_dirty_ = true;
         interrupt_pending_ = false;
         interrupt_ = 0;
         irr_ = 0;
@@ -36,6 +37,7 @@ public:
     }
 
     void stubInit() {
+        selection_dirty_ = true;
         icw1_ = 0x13;
         icw2_ = 0x08;
         icw4_ = 0x0f;
@@ -43,6 +45,7 @@ public:
     }
 
     void write(const uint32_t address, const uint8_t data) {
+        selection_dirty_ = true;
         if (address == 0) {
             if ((data & 0x10) != 0) {
                 icw1_ = data;
@@ -151,6 +154,7 @@ public:
     }
 
     uint8_t interruptAcknowledge() {
+        selection_dirty_ = true;
         if (acknowledged_bytes_ == 0) {
             acknowledge();
             acknowledged_bytes_ = 1;
@@ -195,6 +199,8 @@ public:
     }
 
     void setIRQLine(const int line, const bool state) {
+        const auto old_irr = irr_;
+        const auto old_lines = lines_;
         const uint8_t b = 1 << line;
         if (state) {
             if (levelTriggered() || (lines_ & b) == 0) {
@@ -206,18 +212,20 @@ public:
             irr_ &= ~b;
             lines_ &= ~b;
         }
+        if (irr_ != old_irr || lines_ != old_lines) {
+            selection_dirty_ = true;
+        }
     }
 
     [[nodiscard]]
     bool interruptPending() {
-        auto i = findBestInterrupt();
-        if (i != -1) {
-            if (i != 0) {
-                //std::cout << "PIC interrupt pending on line " << i << "\n";
-            }
-            return true;
+        if (selection_dirty_) {
+            // Selection also updates interrupt_. Keep that side effect at the
+            // original query point, rather than moving it to register writes.
+            interrupt_pending_ = findBestInterrupt() != -1;
+            selection_dirty_ = false;
         }
-        return false;
+        return interrupt_pending_;
     }
 
     [[nodiscard]] uint8_t getIRQLines() const { return lines_; }
@@ -270,6 +278,8 @@ private:
     }
 
     void acknowledge() {
+        // Poll reads use this path directly, without interruptAcknowledge().
+        selection_dirty_ = true;
         const int i = findBestInterrupt();
         if (i == -1) {
             interrupt_ = 7;
@@ -314,6 +324,8 @@ private:
         initializationStateICW4
     };
 
+    // All selection inputs and acknowledgement changes invalidate this cache.
+    bool selection_dirty_;
     bool interrupt_pending_;
     int interrupt_;
     uint8_t irr_;

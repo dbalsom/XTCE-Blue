@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <cassert>
 #include <vector>
+#include "cpu_types.h"
 
 #include "Cga.h"
 #include "Dmac.h"
@@ -72,6 +74,7 @@ public:
     void reset() {
         std::ranges::fill(ram_, 0);
         dmac_.reset();
+        std::ranges::fill(dma_pages_, 0);
         pic_.reset();
         pit_.reset();
         ppi_.reset();
@@ -85,6 +88,13 @@ public:
         counter2_gate_ = false;
         speaker_mask_ = false;
         speaker_output_ = false;
+        next_speaker_output_ = false;
+        speaker_cycle_ = 0;
+        address_ = 0;
+        bus_status_ = BusStatus::Passive;
+        cycle_ = 0;
+        conversion_phase_ = ConversionPhase::Idle;
+        conversion_write_valid_ = false;
         dma_state_ = sIdle;
         passive_or_halt_ = true;
         lock_ = false;
@@ -107,17 +117,31 @@ public:
     // Use the same cached level supplied to the speaker callback.
     [[nodiscard]] bool speakerLevel() const { return counter2_output_ && speaker_mask_; }
 
-    void startAccess(const uint32_t address, const int type) {
-        address_ = address;
-        type_ = type;
-        cycle_ = 0;
+    void startAccess(const uint32_t address, const BusStatus bus_status, const unsigned width = 1) {
+        assert(width == 1 || width == 2);
+        startByteAccess(address & addressMask(bus_status), bus_status);
+        conversion_phase_ = ConversionPhase::Idle;
+        if (width == 2 && needsDataConversion(address_, bus_status)) {
+            conversion_phase_ = ConversionPhase::Data;
+            conversion_address_ = address_;
+            conversion_lane_ = 0;
+            conversion_read_data_ = 0;
+            conversion_write_valid_ = false;
+        }
+    }
+
+    // The CPU drives write data before sampling READY. A converted write must
+    // reach both ISA bytes before the CPU's word transfer can complete.
+    void driveWriteData(uint16_t value) {
+        if (conversion_phase_ != ConversionPhase::Idle && !conversion_write_valid_) {
+            conversion_write_data_ = value;
+            conversion_write_valid_ = true;
+        }
     }
 
     void tick() {
         _ticks++;
-        for (int i = 0; i < 3; ++i) {
-            cga_.tick();
-        }
+        cga_.tick3();
         cga_phase_ = (cga_phase_ + 3) & 0x0f;
         pit_phase_++;
 
@@ -198,7 +222,7 @@ public:
         // http://www.vcfed.org/forum/showthread.php?29211-Purpose-of-U90-in-XT-second-revision-board
         bool hasDMACFix = true;
 
-        if (type_ != 2 || (address_ & 0x3e0) != 0x000 || !hasDMACFix) {
+        if (bus_status_ != BusStatus::IoWrite || (address_ & 0x3e0) != 0x000 || !hasDMACFix) {
             last_non_dma_ready_ = nonDMAReady();
         }
         // if (_previousLock && !_lock)
@@ -215,7 +239,8 @@ public:
                 break;
             case sHRQ:
                 //_dmaState = _lastNonDMAReady ? sAEN : sPreAEN;
-                if ((passive_or_halt_ || previous_passive_or_halt_) && !lock_ && last_non_dma_ready_) {
+                if ((passive_or_halt_ || previous_passive_or_halt_) && !lock_ && last_non_dma_ready_ &&
+                    dataConversionReady()) {
                     dma_state_ = sAEN;
                 }
                 break;
@@ -289,13 +314,60 @@ public:
         previous_passive_or_halt_ = passive_or_halt_;
 
         last_non_dma_ready_ = nonDMAReady();
-        ++cycle_;
+        if (conversion_phase_ == ConversionPhase::Idle || (!getAEN() && dmaReady())) {
+            ++cycle_;
+            tickDataConverter();
+        }
     }
 
-    bool ready() { return dmaReady() && nonDMAReady(); }
+    bool ready() {
+        return dmaReady() && nonDMAReady() && dataConversionReady() &&
+            (conversion_phase_ == ConversionPhase::Idle || !getAEN());
+    }
+
+    // Complete the native CPU transfer. ISA words were already transferred by
+    // the converter while READY was low; reads here consume its latched data.
+    // Motherboard RAM and ROM accept either width in the original CPU cycle.
+    uint16_t readTransfer(uint32_t address, unsigned width, BusStatus operation) {
+        assert(width == 1 || width == 2);
+        const uint32_t mask = addressMask(operation);
+        address &= mask;
+        if (width == 2 && needsDataConversion(address, operation)) {
+            assert(conversion_phase_ == ConversionPhase::Complete && address == conversion_address_);
+            return conversion_read_data_;
+        }
+        if (operation == BusStatus::IoRead) {
+            assert(width == 1 && address == address_ && operation == bus_status_);
+            return read();
+        }
+        uint16_t value = 0;
+        for (unsigned lane = 0; lane < width; ++lane) {
+            value |= uint16_t(peek((address + lane) & mask)) << (8 * lane);
+        }
+        return value;
+    }
+
+    void writeTransfer(uint32_t address, uint16_t value, unsigned width, BusStatus operation) {
+        assert(width == 1 || width == 2);
+        const uint32_t mask = addressMask(operation);
+        address &= mask;
+        if (width == 2 && needsDataConversion(address, operation)) {
+            assert(conversion_phase_ == ConversionPhase::Complete && address == conversion_address_);
+            assert(conversion_write_valid_ && value == conversion_write_data_);
+            return;
+        }
+        if (operation == BusStatus::IoWrite) {
+            assert(width == 1 && address == address_ && operation == bus_status_);
+            write(uint8_t(value));
+            return;
+        }
+        for (unsigned lane = 0; lane < width; ++lane) {
+            writeMemoryByte((address + lane) & mask, uint8_t(value >> (8 * lane)));
+        }
+    }
 
     void write(uint8_t data) {
-        if (type_ == 2) {
+        if (bus_status_ == BusStatus::IoWrite) {
             // IO write
             switch (address_ & 0x3e0) {
                 case 0x00:
@@ -347,30 +419,24 @@ public:
         }
 
         else {
-            // Memory write
-            if (address_ < CONVENTIONAL_RAM_SIZE) {
-                ram_[address_] = data;
-            }
-            else if (address_ >= CGA_ADDRESS && address_ < CGA_ADDRESS + CGA_APERTURE_SIZE) {
-                cga_.writeMem(address_ - CGA_ADDRESS, data);
-            }
+            writeMemoryByte(address_, data);
         }
     }
 
     uint8_t read() {
-        if (type_ == 0) {
+        if (bus_status_ == BusStatus::InterruptAcknowledge) {
             // Interrupt acknowledge
-            auto i = pic_.interruptAcknowledge();
+            const auto i = pic_.interruptAcknowledge();
             if (i != 0xFF && i != 0x08) {
                 std::cout << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n"
                           << std::flush;
             }
             return i;
         }
-        if (type_ == 1) {
+        if (bus_status_ == BusStatus::IoRead) {
             // IO read
 
-            // noisy trace debu
+            // noisy trace debug
             // std::cout << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
 
             // Read from IO port
@@ -446,18 +512,14 @@ public:
 
     [[nodiscard]] uint8_t getDMA() const { return dmac_.getRequestLines() | (dack0() ? 0x10 : 0); }
 
-    std::string snifferExtra() {
-        return ""; // hex(_pit.getMode(1), 4, false) + " ";
-    }
-
-    [[nodiscard]] int getBusOperation() const {
+    [[nodiscard]] BusStatus getBusOperation() const {
         switch (dma_state_) {
             case s2:
-                return 5; // memr
+                return BusStatus::MemoryRead;
             case s3:
-                return 2; // iow
+                return BusStatus::IoWrite;
             default:
-                return 0;
+                return BusStatus::Passive;
         }
     }
 
@@ -473,26 +535,104 @@ public:
 
     [[nodiscard]] uint8_t getDMAS() const {
         if (dma_state_ == sAEN || dma_state_ == s0 || dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 ||
-            dma_state_ == sWait)
+            dma_state_ == sWait) {
             return 3;
-        if (dma_state_ == sHRQ || dma_state_ == sHoldWait || dma_state_ == sPreAEN)
+        }
+        if (dma_state_ == sHRQ || dma_state_ == sHoldWait || dma_state_ == sPreAEN) {
             return 1;
+        }
         return 0;
     }
 
     [[nodiscard]] uint8_t getCGA() const { return cga_phase_ >> 2; }
 
 private:
+    enum class ConversionPhase { Idle, Data, Recovery, NextByte, Complete };
+
+    static uint32_t addressMask(BusStatus operation) {
+        return operation == BusStatus::IoRead || operation == BusStatus::IoWrite ? 0xffff : 0xfffff;
+    }
+
+    static bool isIsaMemory(uint32_t address) {
+        // The current map places CGA and expansion memory between system RAM
+        // and the motherboard BIOS. Unpopulated ISA addresses remain byte-wide.
+        return address >= CONVENTIONAL_RAM_SIZE && address < ROM_BASE_ADDRESS;
+    }
+
+    static bool needsDataConversion(uint32_t address, BusStatus operation) {
+        if (operation == BusStatus::IoRead || operation == BusStatus::IoWrite) {
+            return true;
+        }
+        if (operation == BusStatus::MemoryRead || operation == BusStatus::MemoryWrite ||
+            operation == BusStatus::InstructionFetch) {
+            return isIsaMemory(address) || isIsaMemory((address + 1) & 0xfffff);
+        }
+        return false;
+    }
+
+    void startByteAccess(uint32_t address, BusStatus operation) {
+        address_ = address;
+        bus_status_ = operation;
+        cycle_ = 0;
+    }
+
+    bool dataConversionReady() const {
+        return conversion_phase_ == ConversionPhase::Idle || conversion_phase_ == ConversionPhase::Complete;
+    }
+
+    void tickDataConverter() {
+        switch (conversion_phase_) {
+            case ConversionPhase::Data: {
+                // T1 and T2 precede the data phase. I/O can also add Tw through
+                // nonDMAReady(); memory on ISA uses the same byte sequencing.
+                const bool writing = bus_status_ == BusStatus::IoWrite || bus_status_ == BusStatus::MemoryWrite;
+                if (cycle_ < 2 || !nonDMAReady() || (writing && !conversion_write_valid_)) {
+                    return;
+                }
+                if (writing) {
+                    write(uint8_t(conversion_write_data_ >> (8 * conversion_lane_)));
+                }
+                else {
+                    conversion_read_data_ |= uint16_t(read()) << (8 * conversion_lane_);
+                }
+                conversion_phase_ = conversion_lane_ == 0 ? ConversionPhase::Recovery : ConversionPhase::Complete;
+                break;
+            }
+            case ConversionPhase::Recovery:
+                // Finish the low byte's T4 before starting the high byte's T1.
+                conversion_phase_ = ConversionPhase::NextByte;
+                break;
+            case ConversionPhase::NextByte:
+                conversion_lane_ = 1;
+                startByteAccess((conversion_address_ + 1) & addressMask(bus_status_), bus_status_);
+                conversion_phase_ = ConversionPhase::Data;
+                break;
+            default:
+                break;
+        }
+    }
+
+    void writeMemoryByte(uint32_t address, uint8_t data) {
+        if (address < CONVENTIONAL_RAM_SIZE) {
+            ram_[address] = data;
+        }
+        else if (address >= CGA_ADDRESS && address < CGA_ADDRESS + CGA_APERTURE_SIZE) {
+            cga_.writeMem(address - CGA_ADDRESS, data);
+        }
+    }
+
     [[nodiscard]] bool dmaReady() const {
         if (dma_state_ == s1 || dma_state_ == s2 || dma_state_ == s3 || dma_state_ == sWait || dma_state_ == s4 ||
-            dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/)
+            dma_state_ == sDelayedT1 || dma_state_ == sDelayedT2 /*|| _dmaState == sDelayedT3*/) {
             return false;
+        }
         return true;
     }
 
     [[nodiscard]] bool nonDMAReady() const {
-        if (type_ == 1 || type_ == 2) // Read port, write port
+        if (bus_status_ == BusStatus::IoRead || bus_status_ == BusStatus::IoWrite) {
             return cycle_ > 2; // System board adds a wait state for onboard IO devices
+        }
         return true;
     }
 
@@ -561,8 +701,8 @@ private:
     }
 
     [[nodiscard]] uint32_t dmaAddressHigh(const int channel) const {
-        // static const int pageRegister[4] = {0x83, 0x83, 0x81, 0x82};
-        return static_cast<uint32_t>(dma_pages_[channel & 3]) << 16;
+        // The XT DMA controller drives only A16-A19 above its 16-bit address.
+        return static_cast<uint32_t>(dma_pages_[channel & 3] & 0x0f) << 16;
     }
 
     enum DMAState
@@ -587,8 +727,14 @@ private:
     std::vector<uint8_t> ram_;
     std::vector<uint8_t> rom_;
     uint32_t address_;
-    int type_;
+    BusStatus bus_status_;
     int cycle_;
+    ConversionPhase conversion_phase_ = ConversionPhase::Idle;
+    uint32_t conversion_address_ = 0;
+    unsigned conversion_lane_ = 0;
+    uint16_t conversion_read_data_ = 0;
+    uint16_t conversion_write_data_ = 0;
+    bool conversion_write_valid_ = false;
     DMAC dmac_;
     PIC pic_;
     PIT pit_;

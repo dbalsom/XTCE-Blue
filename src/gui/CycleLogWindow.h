@@ -2,6 +2,8 @@
 
 #include "DebuggerWindow.h"
 #include "../core/Machine.h"
+#include <cstdint>
+#include <optional>
 #include <string>
 
 class CycleLogWindow : public DebuggerWindow {
@@ -9,7 +11,6 @@ public:
     explicit CycleLogWindow(Machine* machine) : _machine(machine) {
         if (_machine) {
             _capacityUI = static_cast<int>(_machine->getCycleLogCapacity());
-            _lastSeenSize = _machine->getCycleLogSize();
         }
     }
     ~CycleLogWindow() override = default;
@@ -21,7 +22,10 @@ public:
 private:
     Machine* _machine{nullptr};
     bool _autoScroll{true};
+    bool show_main_text_{true};
+    bool show_microcode_{true};
     int _capacityUI{10000};
-    size_t _lastSeenSize{0};
+    std::optional<uint64_t> _lastSeenRevision;
+    std::string _lineBuffer;
 };
 
