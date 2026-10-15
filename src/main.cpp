@@ -165,6 +165,9 @@ struct AppContext
     SDL_DialogFileFilter* pending_filters{nullptr}; // owned until dialog callback
     std::string pending_disk_path;
     bool pending_disk_load_flag{false};
+    std::string pending_disk_error;
+    std::string disk_load_error;
+    std::string floppy0_filename;
 
     void resetUtilization() {
         utilization_counter_ticks = 0;
@@ -333,6 +336,41 @@ struct AppContext
         }
     }
 };
+
+// Return an error description, leaving the mounted disk alone if reading fails.
+static std::string loadFloppyImage(AppContext& app, const std::string& path) {
+    try {
+        const std::filesystem::path image_path(std::u8string(path.begin(), path.end()));
+        const auto filename_utf8 = image_path.filename().u8string();
+        std::string filename(filename_utf8.begin(), filename_utf8.end());
+        std::ifstream in(image_path, std::ios::binary | std::ios::ate);
+        if (!in) {
+            return "The file could not be opened.";
+        }
+        const auto size = in.tellg();
+        if (size < 0) {
+            return "The file size could not be read.";
+        }
+        if (size == 0) {
+            return "The image is empty.";
+        }
+        std::vector<uint8_t> data(static_cast<size_t>(size));
+        in.seekg(0);
+        if (!in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()))) {
+            return "The image could not be read completely.";
+        }
+        auto* bus = app.machine->getBus();
+        if (!bus || !bus->fdc() || !bus->fdc()->loadDisk(0, data, true)) {
+            return "The image could not be mounted in drive A:.";
+        }
+        app.floppy0_filename.swap(filename);
+        SDL_Log("Loaded floppy image '%s' into FDC drive 0 (%zu bytes)", path.c_str(), data.size());
+        return {};
+    }
+    catch (const std::exception& e) {
+        return std::string("Unable to load the image: ") + e.what();
+    }
+}
 
 // SDL failure callback - logs the error and returns failure code.
 SDL_AppResult SDL_Fail() {
@@ -608,6 +646,11 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     ctx->mixer = mixer;
     ctx->pc_speaker_stream = stream;
     ctx->machine = machine;
+    if (!floppy0_data.empty()) {
+        const auto filename =
+            std::filesystem::path(std::u8string(cfg.floppy0.begin(), cfg.floppy0.end())).filename().u8string();
+        ctx->floppy0_filename.assign(filename.begin(), filename.end());
+    }
 
     // Initialize Blip_Buffer
     ctx->blip_buf.sample_rate(AUDIO_SAMPLE_RATE);
@@ -808,6 +851,30 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui::NewFrame();
 
+    // Copy the dialog result before doing file I/O or calling ImGui on the main thread.
+    std::string disk_path;
+    std::string disk_error;
+    bool file_dialog_open;
+    {
+        std::lock_guard<std::mutex> lk(app->file_dialog_mutex);
+        if (app->pending_disk_load_flag) {
+            disk_path.swap(app->pending_disk_path);
+            app->pending_disk_load_flag = false;
+        }
+        disk_error.swap(app->pending_disk_error);
+        file_dialog_open = app->pending_filters != nullptr;
+    }
+    if (!disk_path.empty()) {
+        if (const auto error = loadFloppyImage(*app, disk_path); !error.empty()) {
+            disk_error = disk_path + "\n\n" + error;
+        }
+    }
+    if (!disk_error.empty()) {
+        app->disk_load_error.swap(disk_error);
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Floppy load failed: %s", app->disk_load_error.c_str());
+        ImGui::OpenPopup("Floppy load failed");
+    }
+
     // Draw the main menu bar
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Emulator")) {
@@ -842,7 +909,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
         // Media menu for loading disk images
         if (ImGui::BeginMenu("Media")) {
-            if (ImGui::MenuItem("Load floppy image")) {
+            if (ImGui::MenuItem("Load floppy image...", nullptr, false, !file_dialog_open)) {
                 // Allocate filters on the heap; they must remain valid until the callback runs.
                 auto filters = new SDL_DialogFileFilter[1];
                 filters[0].name = "IMG files";
@@ -856,6 +923,23 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
                 // Launch asynchronous native open-file dialog. allow_many=false
                 SDL_ShowOpenFileDialog(FileDialogCallback, app, app->window, filters, 1, nullptr, false);
+            }
+            auto* fdc = app->machine->getBus()->fdc();
+            if (fdc->hasDisk(0) && !app->floppy0_filename.empty()) {
+                ImGui::Separator();
+                const auto label = app->floppy0_filename + "###floppy0";
+                if (ImGui::BeginMenu(label.c_str())) {
+                    if (ImGui::MenuItem("Eject")) {
+                        if (fdc->ejectDisk(0)) {
+                            app->floppy0_filename.clear();
+                        }
+                    }
+                    bool write_protected = fdc->isWriteProtected(0);
+                    if (ImGui::MenuItem("Write protected", nullptr, &write_protected, fdc->hasDisk(0))) {
+                        fdc->setWriteProtected(0, write_protected);
+                    }
+                    ImGui::EndMenu();
+                }
             }
             ImGui::EndMenu();
         }
@@ -947,6 +1031,19 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     // Show any registered debug windows
     app->dbg_manager.showAll();
 
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Floppy load failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetFontSize() * 32.0f);
+        ImGui::TextUnformatted(app->disk_load_error.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Separator();
+        if (ImGui::Button("OK", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+        ImGui::EndPopup();
+    }
+
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
     SDL_RenderClear(app->renderer);
 
@@ -987,33 +1084,6 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), app->renderer);
     if (SDL_RenderPresent(app->renderer)) {
         app->frame_count++;
-    }
-
-    // Process pending file dialog result (if any)
-    {
-        std::lock_guard<std::mutex> lk(app->file_dialog_mutex);
-        if (app->pending_disk_load_flag) {
-            app->pending_disk_load_flag = false;
-
-            // Load the selected disk image into the emulator
-            if (auto* bus = app->machine->getBus()) {
-                try {
-                    if (std::ifstream in(app->pending_disk_path, std::ios::binary); !in) {
-                        SDL_Log("Failed to open selected floppy image: %s", app->pending_disk_path.c_str());
-                    }
-                    else {
-                        std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)),
-                                                  std::istreambuf_iterator<char>());
-                        bus->fdc()->loadDisk(0, data, true);
-                        SDL_Log("Loaded floppy image '%s' into FDC drive 0 (%zu bytes)", app->pending_disk_path.c_str(),
-                                data.size());
-                    }
-                }
-                catch (const std::exception& e) {
-                    SDL_Log("Exception while loading floppy image: %s", e.what());
-                }
-            }
-        }
     }
 
     return app->app_quit;
@@ -1119,20 +1189,14 @@ static void FileDialogCallback(void* userdata, const char* const* filelist, int 
         return;
     }
     auto* app = static_cast<AppContext*>(userdata);
+    std::lock_guard<std::mutex> lk(app->file_dialog_mutex);
     if (!filelist) {
-        SDL_Log("File dialog error: %s", SDL_GetError());
+        app->pending_disk_error = std::string("The file picker could not be opened.\n\n") + SDL_GetError();
     }
-    else if (!filelist[0]) {
-        SDL_Log("File dialog canceled by user.");
-    }
-    else {
+    else if (filelist[0]) {
         // Store the first selected path for processing on the main thread
-        {
-            const char* path = filelist[0];
-            std::lock_guard<std::mutex> lk(app->file_dialog_mutex);
-            app->pending_disk_path = path;
-            app->pending_disk_load_flag = true;
-        }
+        app->pending_disk_path = filelist[0];
+        app->pending_disk_load_flag = true;
     }
 
     // Free any filters array we allocated earlier and stored in the context

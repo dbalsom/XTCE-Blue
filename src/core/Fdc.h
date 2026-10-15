@@ -47,6 +47,8 @@ static constexpr uint8_t ST1_DATA_ERROR = 0x20;
 static constexpr uint8_t ST2_BAD_CYL = 0x02;
 static constexpr uint8_t ST3_TRACK0 = 0x10;
 static constexpr uint8_t ST3_HEAD = 0x04;
+static constexpr uint8_t ST3_READY = 0x20;
+static constexpr uint8_t ST3_WRITE_PROTECTED = 0x40;
 
 // ------------------------------ Opcodes (base) ------------------------------
 static constexpr uint8_t OPC_SPECIFY = 0x03;
@@ -140,13 +142,16 @@ public:
 
     void attachPIC(PIC* p) { pic_ = p; }
 
-    // Insert/eject a disk image (raw CHS-linear).
+    // Insert a disk image (raw CHS-linear).
     bool loadDisk(DriveIndex drv, const std::vector<uint8_t>& bytes, bool writeProtected = false) {
         if (drv >= 4) {
             return false;
         }
         auto& d = drives_[drv];
         d.image = bytes;
+        if (drv == sel_) {
+            abortDataOp();
+        }
         d.have_disk = !bytes.empty();
         d.write_protected = writeProtected;
         inferGeometry(d);
@@ -155,6 +160,42 @@ public:
         xtce::log::info() << std::format("FDC: Loaded disk into drive {} ({} bytes, {}C/{}H/{}S, {}-protected)\n", drv,
                                  bytes.size(), d.max_cylinders, d.max_heads, d.max_sectors,
                                  writeProtected ? "write" : "read-write");
+        return true;
+    }
+
+    bool ejectDisk(DriveIndex drv) {
+        if (!hasDisk(drv)) {
+            return false;
+        }
+        if (drv == sel_) {
+            abortDataOp();
+        }
+        auto& d = drives_[drv];
+        d.image.clear();
+        d.have_disk = false;
+        d.ready = false;
+        d.write_protected = false;
+        xtce::log::info() << std::format("FDC: Ejected disk from drive {}\n", drv);
+        return true;
+    }
+
+    [[nodiscard]] bool hasDisk(DriveIndex drv) const {
+        return drv < drives_.size() && drives_[drv].have_disk;
+    }
+
+    [[nodiscard]] bool isWriteProtected(DriveIndex drv) const {
+        return hasDisk(drv) && drives_[drv].write_protected;
+    }
+
+    bool setWriteProtected(DriveIndex drv, bool writeProtected) {
+        if (!hasDisk(drv)) {
+            return false;
+        }
+        drives_[drv].write_protected = writeProtected;
+        if (writeProtected && drv == sel_
+            && (op_.kind == OpKind::WriteDMA || op_.kind == OpKind::FormatDMA)) {
+            abortDataOp(true);
+        }
         return true;
     }
 
@@ -621,6 +662,12 @@ private:
         if (drives_[drv].cylinder == 0) {
             st3 |= ST3_TRACK0;
         }
+        if (drives_[drv].ready) {
+            st3 |= ST3_READY;
+        }
+        if (drives_[drv].write_protected) {
+            st3 |= ST3_WRITE_PROTECTED;
+        }
         pushResult({st3});
     }
 
@@ -789,6 +836,18 @@ private:
     }
 
     // ------------------------------ DMA helpers ------------------------------
+    void abortDataOp(bool write_protect = false) {
+        if (op_.kind != OpKind::ReadDMA && op_.kind != OpKind::WriteDMA && op_.kind != OpKind::FormatDMA) {
+            return;
+        }
+        const auto interrupted = op_;
+        setDrq(false);
+        op_ = Op{};
+        bytes_left_ = 0;
+        endError(interrupted.C, interrupted.H, interrupted.S, interrupted.N,
+                 interrupted.kind != OpKind::ReadDMA, write_protect);
+    }
+
     void startDma(const OpKind kind, const uint8_t C, const uint8_t H, const uint8_t S, const uint8_t N,
                   const uint8_t EOT, const uint32_t bps) {
         op_ = {kind, true, 0, C, H, S, N, EOT};
