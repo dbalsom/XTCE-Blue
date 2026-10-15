@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <format>
-#include <iostream>
+#include "Log.h"
 
 class Keyboard
 {
@@ -16,19 +16,19 @@ public:
     Keyboard() { reset(); }
 
     void setClockLineState(const bool state) {
-        std::cout << std::format("Keyboard: Setting clock line state to {}\n", state ? "HIGH" : "LOW");
+        xtce::log::debug() << std::format("Keyboard: Setting clock line state to {}\n", state ? "HIGH" : "LOW");
         if (!state && clock_line_state_) {
             // Clock line went high->low
-            std::cout << "Keyboard: Clock line went low." << std::endl;
+            xtce::log::debug() << "Keyboard: Clock line went low." << std::endl;
             resetting_ = true;
             clock_line_low_ticks_ = 0;
         }
         else if (state && !clock_line_state_) {
             // Clock line went low->high
-            std::cout << "Keyboard: Clock line went high." << std::endl;
+            xtce::log::debug() << "Keyboard: Clock line went high." << std::endl;
             if (clock_line_low_ticks_ >= kResetTicks) {
                 // Clock line was held low long enough to trigger reset.
-                std::cout << "Keyboard: Detected reset condition on clock line.\n";
+                xtce::log::debug() << "Keyboard: Detected reset condition on clock line.\n";
                 resetting_ = true;
             }
             clock_line_high_ticks_ = 0;
@@ -54,7 +54,7 @@ public:
     void tick() {
         if (!clock_line_state_) {
             clock_line_low_ticks_++;
-            // std::cout << std::format("Keyboard: Clock line low ticks: {}\n", clock_line_low_ticks_);
+            // xtce::log::debug() << std::format("Keyboard: Clock line low ticks: {}\n", clock_line_low_ticks_);
         }
         else {
             clock_line_high_ticks_++;

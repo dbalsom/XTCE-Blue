@@ -12,7 +12,8 @@ enum class MachineState
 {
     Running,
     Stopped,
-    BreakpointHit
+    BreakpointHit,
+    OffRails
 };
 
 class Machine
@@ -53,7 +54,6 @@ public:
             [](auto& cpu)
             {
                 cpu.setLogInstructions(false);
-                cpu.setOffRailsDetection(true, 20);
             });
     }
     Machine(const Machine&) = delete;
@@ -65,15 +65,16 @@ public:
     std::string getCpuName() const { return cpuSelectionName(selection_); }
 
     void run_for(uint64_t ticks) {
-        const bool stopped = visitCpu(
+        const auto result = visitCpu(
             [&](auto& cpu)
             {
-                using Result = typename std::remove_reference_t<decltype(cpu)>::RunResult;
-                const auto result = cpu.run_for(static_cast<int>(ticks / 3));
-                return result == Result::BreakpointHit || result == Result::OffRails;
+                return cpu.run_for(static_cast<int>(ticks / 3));
             });
-        if (stopped) {
+        if (result == cpu::ExecutionControl::RunResult::BreakpointHit) {
             state_ = MachineState::BreakpointHit;
+        }
+        else if (result == cpu::ExecutionControl::RunResult::OffRails) {
+            state_ = MachineState::OffRails;
         }
     }
 
@@ -108,6 +109,8 @@ public:
                 return "Stopped";
             case MachineState::BreakpointHit:
                 return "Breakpoint Hit";
+            case MachineState::OffRails:
+                return "Off Rails";
         }
         return "Unknown";
     }
@@ -208,6 +211,10 @@ public:
     }
     void clearSoftwareInterruptBreakpoint() {
         visitCpu([](auto& cpu) { cpu.clearSoftwareInterruptBreakpoint(); });
+    }
+
+    void setOffRailsDetection(bool enabled, int maximum = 20) {
+        visitCpu([&](auto& cpu) { cpu.setOffRailsDetection(enabled, maximum); });
     }
 
     void setLogInstructions(bool enabled) {

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <cstdint>
+#include "Log.h"
 #include <cassert>
+#include <cstdint>
 #include <vector>
 #include "cpu_types.h"
 
@@ -189,7 +190,7 @@ public:
                 // PB7 holds the shift register clear and suppresses IRQ1. With
                 // the clock running, bytes sent during clear are discarded.
                 if (!ppi_.getB(7)) {
-                    std::cout << std::format("Keyboard generated scancode: {:02X}", b) << std::endl;
+                    xtce::log::debug() << std::format("Keyboard generated scancode: {:02X}", b) << std::endl;
                     for (int i = 0; i < 8; ++i) {
                         const auto bit = (b >> i) & 1;
                         ppi_.setA(i, bit != 0);
@@ -204,9 +205,9 @@ public:
 
         // // Handle FDC interrupts
         // if (_fdc.pollIrq()) {
-        //     //std::cout << "FDC IRQ 6 detected\n" << std::flush;
+        //     //xtce::log::debug() << "FDC IRQ 6 detected\n" << std::flush;
         //     if (!_lastIRQ6) {
-        //         std::cout << "FDC IRQ 6 asserted\n" << std::flush;
+        //         xtce::log::debug() << "FDC IRQ 6 asserted\n" << std::flush;
         //     }
         //     _pic.setIRQLine(6, true);
         //     _lastIRQ6 = true;
@@ -269,17 +270,19 @@ public:
                     auto addr = dmaAddressHigh(2) + static_cast<uint32_t>(dmac_.getAddress());
 
                     if (dmac_.isReading()) {
-                        std::cout << std::format("DMAC Channel 2 READ from address {:05X}\n", addr);
+                        // xtce::log::trace() << std::format("DMAC Channel 2 READ from address {:05X}\n", addr);
+                        fdc_.dmaDeviceWrite(peek(addr & 0xFFFFF));
                     }
                     else if (dmac_.isWriting()) {
                         const auto b = fdc_.dmaDeviceRead();
-                        // std::cout << std::format("DMAC Channel 2 WRITE to address {:02X}->{:05X}\n", b, addr);
-                        ram_[addr & 0xFFFFF] = b;
+                        // xtce::log::trace() << std::format("DMAC Channel 2 WRITE to address {:02X}->{:05X}\n", b, addr);
+                        // DMA uses the same memory map as CPU writes, including CGA VRAM.
+                        writeMemoryByte(addr & 0xFFFFF, b);
                     }
                     dmac_.service();
                     if (dmac_.isAtTerminalCount()) {
                         // Notify FDC that DMA operation is complete
-                        std::cout << std::format(
+                        xtce::log::debug() << std::format(
                             "DMAC Channel 2 terminal count reached at address [{:05X}], page [{:02X}], notifying FDC\n",
                             addr, dma_pages_[2]);
                         fdc_.dmaDeviceEOP();
@@ -393,7 +396,7 @@ public:
                             dma_pages_[1] = data;
                             break;
                         case 0x81:
-                            std::cout << std::format("Write to DMA page register 2: {:02X}\n", data);
+                            xtce::log::debug() << std::format("Write to DMA page register 2: {:02X}\n", data);
                             dma_pages_[2] = data;
                             break;
                         case 0x82:
@@ -428,7 +431,7 @@ public:
             // Interrupt acknowledge
             const auto i = pic_.interruptAcknowledge();
             if (i != 0xFF && i != 0x08) {
-                std::cout << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n"
+                xtce::log::trace() << "Interrupt acknowledge: vector " << std::hex << static_cast<int>(i) << std::dec << "\n"
                           << std::flush;
             }
             return i;
@@ -437,7 +440,7 @@ public:
             // IO read
 
             // noisy trace debug
-            // std::cout << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
+            // xtce::log::trace() << "IO read from port " << std::hex << _address << std::dec << "\n" << std::flush;
 
             // Read from IO port
             switch (address_ & 0x3e0) {
@@ -448,13 +451,13 @@ public:
                 case 0x40:
                     {
                         const uint8_t b = pit_.read(address_ & 3);
-                        // std::cout << "PIT read from port " << std::hex << (_address & 3)
+                        // xtce::log::trace() << "PIT read from port " << std::hex << (_address & 3)
                         //     << ": " << std::hex << static_cast<int>(b) << std::dec << "\n";
                         return b;
                     }
                 case 0x60:
                     {
-                        // std::cout << "PPI read from port " << std::hex << (_address & 3) << std::dec << "\n";
+                        // xtce::log::trace() << "PPI read from port " << std::hex << (_address & 3) << std::dec << "\n";
                         const uint8_t b = ppi_.read(address_ & 3);
                         updatePPI();
                         return b;
@@ -478,7 +481,7 @@ public:
                 case 0x3E0:
                     return fdc_.readIO(address_ & 7);
                 default:
-                    // std::cout << "Unhandled IO read from port " << std::hex << _address << std::dec << "\n";
+                    // xtce::log::trace() << "Unhandled IO read from port " << std::hex << _address << std::dec << "\n";
                     return 0xFF;
             }
         }
@@ -547,7 +550,14 @@ public:
     [[nodiscard]] uint8_t getCGA() const { return cga_phase_ >> 2; }
 
 private:
-    enum class ConversionPhase { Idle, Data, Recovery, NextByte, Complete };
+    enum class ConversionPhase
+    {
+        Idle,
+        Data,
+        Recovery,
+        NextByte,
+        Complete
+    };
 
     static uint32_t addressMask(BusStatus operation) {
         return operation == BusStatus::IoRead || operation == BusStatus::IoWrite ? 0xffff : 0xfffff;
@@ -582,22 +592,23 @@ private:
 
     void tickDataConverter() {
         switch (conversion_phase_) {
-            case ConversionPhase::Data: {
-                // T1 and T2 precede the data phase. I/O can also add Tw through
-                // nonDMAReady(); memory on ISA uses the same byte sequencing.
-                const bool writing = bus_status_ == BusStatus::IoWrite || bus_status_ == BusStatus::MemoryWrite;
-                if (cycle_ < 2 || !nonDMAReady() || (writing && !conversion_write_valid_)) {
-                    return;
+            case ConversionPhase::Data:
+                {
+                    // T1 and T2 precede the data phase. I/O can also add Tw through
+                    // nonDMAReady(); memory on ISA uses the same byte sequencing.
+                    const bool writing = bus_status_ == BusStatus::IoWrite || bus_status_ == BusStatus::MemoryWrite;
+                    if (cycle_ < 2 || !nonDMAReady() || (writing && !conversion_write_valid_)) {
+                        return;
+                    }
+                    if (writing) {
+                        write(uint8_t(conversion_write_data_ >> (8 * conversion_lane_)));
+                    }
+                    else {
+                        conversion_read_data_ |= uint16_t(read()) << (8 * conversion_lane_);
+                    }
+                    conversion_phase_ = conversion_lane_ == 0 ? ConversionPhase::Recovery : ConversionPhase::Complete;
+                    break;
                 }
-                if (writing) {
-                    write(uint8_t(conversion_write_data_ >> (8 * conversion_lane_)));
-                }
-                else {
-                    conversion_read_data_ |= uint16_t(read()) << (8 * conversion_lane_);
-                }
-                conversion_phase_ = conversion_lane_ == 0 ? ConversionPhase::Recovery : ConversionPhase::Complete;
-                break;
-            }
             case ConversionPhase::Recovery:
                 // Finish the low byte's T4 before starting the high byte's T1.
                 conversion_phase_ = ConversionPhase::NextByte;

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
-#include <iostream>
+#include "Log.h"
 
 #include "Crtc.h"
 #include "font.h"
@@ -571,14 +571,14 @@ private:
     [[nodiscard]] bool isCursorActive() const { return crtc_.cursor_immediate() && cursor_blink_state_; }
 
     void tick_lchar() {
-        // std::cout << "CGA: tick_lchar at beamX=" << beamX_ << " beamY=" << beamY_ << " rba=" << rba_ << "\n";
+        // xtce::log::trace() << "CGA: tick_lchar at beamX=" << beamX_ << " beamY=" << beamY_ << " rba=" << rba_ << "\n";
 
         // Only render if within display extents
         if (rba_ < (CGA_MAX_CLOCK - 16)) {
             if (crtc_.den()) {
                 // Draw current character row
                 if (!mode_graphics_) {
-                    // std::cout << "CGA: Drawing text mode char at rba=" << rba_ << "\n";
+                    // xtce::log::trace() << "CGA: Drawing text mode char at rba=" << rba_ << "\n";
                     draw_text_mode_lchar();
                 }
                 else if (mode_hires_gfx_) {
@@ -608,13 +608,13 @@ private:
     }
 
     void tick_hchar() {
-        // std::cout << "CGA: tick_hchar at beamX=" << beamX_ << " beamY=" << beamY_ << " rba=" << rba_ << "\n";
+        // xtce::log::trace() << "CGA: tick_hchar at beamX=" << beamX_ << " beamY=" << beamY_ << " rba=" << rba_ << "\n";
         //  Only render if within display extents
         if (rba_ < (CGA_MAX_CLOCK - 8)) {
             if (crtc_.den()) {
                 // Draw current character row
                 if (!mode_graphics_) {
-                    // std::cout << "CGA: Drawing text mode char at rba=" << rba_ << "\n";
+                    // xtce::log::trace() << "CGA: Drawing text mode char at rba=" << rba_ << "\n";
                     draw_text_mode_hchar();
                 }
                 else if (mode_hires_gfx_) {

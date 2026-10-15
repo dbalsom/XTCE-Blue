@@ -7,4 +7,5 @@
 #include <span>
 #include "core/CpuSelection.h"
 
-SDL_AppResult runBenchmark(CpuSelection selection = {}, std::span<const uint8_t> floppy0 = {});
+SDL_AppResult runBenchmark(CpuSelection selection = {}, std::span<const uint8_t> floppy0 = {},
+                           bool off_rails = false);

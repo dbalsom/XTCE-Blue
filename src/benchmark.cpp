@@ -5,34 +5,14 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <iostream>
 #include <memory>
-#include <streambuf>
 
 #include <SDL3/SDL_timer.h>
 
 #include "core/Machine.h"
+#include "core/Log.h"
 
-namespace {
-
-// Discard routine core/device logging while measuring, without hiding stderr errors.
-class BenchmarkOutputSilencer : public std::streambuf
-{
-public:
-    BenchmarkOutputSilencer() : previous_buffer_(std::cout.rdbuf(this)) {}
-    ~BenchmarkOutputSilencer() override { std::cout.rdbuf(previous_buffer_); }
-
-protected:
-    int_type overflow(const int_type ch) override { return traits_type::not_eof(ch); }
-    std::streamsize xsputn(const char*, const std::streamsize count) override { return count; }
-
-private:
-    std::streambuf* previous_buffer_;
-};
-
-} // namespace
-
-SDL_AppResult runBenchmark(CpuSelection selection, std::span<const uint8_t> floppy0) {
+SDL_AppResult runBenchmark(CpuSelection selection, std::span<const uint8_t> floppy0, bool off_rails) {
     constexpr double kCpuHz = 14318180.0 / 3.0;
     constexpr double kMaxVirtualSeconds = 120.0;
     constexpr auto max_cycles = static_cast<uint64_t>(kCpuHz * kMaxVirtualSeconds);
@@ -40,8 +20,10 @@ SDL_AppResult runBenchmark(CpuSelection selection, std::span<const uint8_t> flop
     std::unique_ptr<Machine> machine;
     double elapsed_seconds = 0.0;
     {
-        BenchmarkOutputSilencer silence;
+        // Suppress routine core logging while keeping warnings and errors in the configured sink.
+        xtce::log::ScopedLevel silence(xtce::log::Level::Warn);
         machine = std::make_unique<Machine>(selection);
+        machine->setOffRailsDetection(off_rails);
         if (!floppy0.empty()) {
             machine->getBus()->fdc()->loadDisk(0, {floppy0.begin(), floppy0.end()}, true);
         }

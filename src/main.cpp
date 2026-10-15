@@ -71,6 +71,7 @@ bool init_audio(SDL_AudioDeviceID* outAudioDevice, MIX_Mixer** outMixer, SDL_Aud
 struct Config
 {
     bool benchmark{false};
+    bool off_rails{false};
     std::string cpu_core{cpuExecutionName(CpuSelection{}.execution)};
     std::string cpu_model{cpuModelName(CpuSelection{}.model)};
     std::string floppy0{};
@@ -378,6 +379,9 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     argv = cli_app.ensure_utf8(argv);
     cli_app.add_option("--cpu-core", cfg.cpu_core, "CPU execution: interpreted or generated");
     cli_app.add_option("--cpu-model", cfg.cpu_model, "CPU model: 8088, 8086, v20 or v30 (8086/NEC require generated)");
+    auto* off_rails_option = cli_app.add_flag(
+        "--off-rails", cfg.off_rails,
+        "Enable the off-rails heuristic: stop after 20 consecutive 00 or FF opcodes (disabled by default)");
     auto* floppy0_option =
         cli_app.add_option("--floppy0", cfg.floppy0, "Mount a raw floppy image in drive A: (write-protected)")
             ->check(CLI::ExistingFile);
@@ -389,6 +393,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     auto* run_test = cli_app.add_subcommand("run-tests", "Run SingleStepTests");
     run_test->excludes(benchmark_option);
     run_test->excludes(floppy0_option);
+    run_test->excludes(off_rails_option);
     run_test->add_option("--test-path", cfg.test_path, "Path to location of SingleStepTests")->required(false);
     run_test->add_option("--test-max", cfg.test_max, "Maximum number of tests to run (0 = no limit)");
     run_test
@@ -438,7 +443,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     }
 
     if (cfg.benchmark) {
-        return runBenchmark(cpu_selection, floppy0_data);
+        return runBenchmark(cpu_selection, floppy0_data, cfg.off_rails);
     }
 
     // If subcommand was invoked, run tests and exit
@@ -590,6 +595,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     // Create a Machine - this represents our emulator core.
     auto machine = new Machine(cpu_selection);
+    machine->setOffRailsDetection(cfg.off_rails);
     if (!floppy0_data.empty()) {
         machine->getBus()->fdc()->loadDisk(0, floppy0_data, true);
     }

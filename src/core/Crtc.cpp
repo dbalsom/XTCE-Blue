@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 Daniel Balsom
+#include "Log.h"
 #include "Crtc.h"
 
 Crtc6845::Crtc6845() { reset(); }
@@ -123,7 +124,7 @@ void Crtc6845::write_register(const uint8_t byte) {
         case CrtcRegister::VerticalTotal:
             // R4: 7-bit
             reg_[4] = static_cast<uint8_t>(byte & 0x7F);
-            // std::cout << "CRTC Register Write (04h): VerticalTotal updated: " << static_cast<unsigned>(reg_[4]);
+            // xtce::log::debug() << "CRTC Register Write (04h): VerticalTotal updated: " << static_cast<unsigned>(reg_[4]);
             break;
 
         case CrtcRegister::VerticalTotalAdjust:
@@ -140,7 +141,7 @@ void Crtc6845::write_register(const uint8_t byte) {
             // R7: 7-bit
             reg_[7] = static_cast<uint8_t>(byte & 0x7F);
             trace_regs_();
-            // std::cout <<  "CRTC Register Write (07h): VerticalSync updated: " << static_cast<unsigned>(reg_[7]);
+            // xtce::log::debug() <<  "CRTC Register Write (07h): VerticalSync updated: " << static_cast<unsigned>(reg_[7]);
             break;
 
         case CrtcRegister::InterlaceMode:
@@ -192,7 +193,7 @@ void Crtc6845::write_register(const uint8_t byte) {
         case CrtcRegister::StartAddressH:
             // R12: 6-bit
             reg_[12] = static_cast<uint8_t>(byte & 0x3F);
-            // std::cout << "CRTC Register Write (0Ch): StartAddressH updated: " << std::hex << std::uppercase <<
+            // xtce::log::debug() << "CRTC Register Write (0Ch): StartAddressH updated: " << std::hex << std::uppercase <<
             // static_cast<unsigned>(byte);
             update_start_address();
             break;
@@ -200,7 +201,7 @@ void Crtc6845::write_register(const uint8_t byte) {
         case CrtcRegister::StartAddressL:
             // R13: 8-bit
             reg_[13] = byte;
-            // std::cout << "CRTC Register Write (0Dh): StartAddressL updated: " << std::hex << std::uppercase <<
+            // xtce::log::debug() << "CRTC Register Write (0Dh): StartAddressL updated: " << std::hex << std::uppercase <<
             // static_cast<unsigned>(byte);
             update_start_address();
             break;
