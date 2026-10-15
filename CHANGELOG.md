@@ -1,6 +1,38 @@
 # Changelog
 
-## [0.2.0] - 2026-10-06
+## 0.3.0 - 2026-10-15
+
+### Added
+
+- Added generated 8088 and 8086 cores. Select the core and CPU with `--cpu-core` and `--cpu-model`.
+- Added microcode-based V20 and V30 emulation, including 8080 mode.
+- Added microcode disassembly and display toggles in the Cycle Log.
+- Added the NEC mode flag (`MF`) to the CPU status window.
+- Added `--floppy0` to mount a floppy image in drive A: at startup.
+- Added modal error popup to display floppy image mounting errors
+- Display loaded floppy image
+- Added eject and write-protect options for loaded floppy images.
+
+### Changed
+
+- The generated 8088 is now the default. The original interpreted core is still available.
+- Off-rails detection is now opt-in with `--off-rails`. Runs of `00` or `FF` opcodes no longer stop execution by default.
+- Core logging now has severity levels and can be redirected to memory or a file.
+
+### Fixed
+
+- Added motherboard bus conversion for 8086/V30 I/O and ISA memory accesses, including CGA.
+- Fixed LOCK handling during interrupt acknowledgement so DMA can resume afterward.
+- DMA writes now respect the memory map, including CGA RAM. Flight Simulator 1.0 now works.
+- Fixed memory-to-floppy DMA transfers. These were only logging the address without transferring any data.
+
+### Testing
+
+- All 3,125,000 V20 SSTs pass, including cycle traces and undefined flags.
+- The 8088 SST suite now passes with undefined flags checked.
+- Checked 8080 emulation with `8080EXER.COM` against a real V20.
+
+## 0.2.0 - 2026-10-06
 
 ### Added
 
@@ -46,4 +78,3 @@
 
 - Initial release.
 
-[0.2.0]: https://github.com/dbalsom/XTCE-Blue/pull/4

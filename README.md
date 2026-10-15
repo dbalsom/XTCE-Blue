@@ -5,7 +5,7 @@ XTCE-Blue is a cycle-accurate IBM PC emulator with microcode-based, cycle-exact 
 It started as a fork of [reenigne's XTCE 8088 CPU emulation core](https://github.com/reenigne/reenigne/tree/master/8088/xtce)
 providing video emulation, an SDL3 interface and an ImGui-based debugger. Several bugs within XTCE were also fixed.
 
-It eventually incorporated [my own microcode disassembly](https://github.com/dbalsom/x86_microcode) of the NEC V20 and V30 microcode and research into bus timings.
+It eventually incorporated [my own microcode disassembly]([https://github.com/dbalsom/x86_microcode](https://github.com/dbalsom/x86_microcode/tree/main/v20)) of the NEC V20 and V30 microcode and research into bus timings.
 
 XTCE-Blue integrates several device implementations ported from [MartyPC](https://github.com/dbalsom/martypc), including its precise, overscan-aware CGA emulation.
 
@@ -106,8 +106,10 @@ xtce-blue --cpu-core generated --cpu-model v20 --floppy0 "path/to/Disk01.img"
  - Some glitches in Area 5150
  - Microsoft Flight Simulator 1.0 fails to load
 
-# Thanks to
+# Special Thanks To:
 
- - Ken Shirriff for his invaluable analysis of the 8088
+ - reenigne for creating XTCE, and decoding the 8088/8086 microcode
+ - Ken Shirriff for his invaluable analysis of the 8088/8086 silicon
+ - dreNorteR for his extensive assistance decoding the V20/V30 microcode
  - Omar Cornut for the excellent Dear ImGui library
  - Blargg for the Blip_Buffer waveform synthesis library

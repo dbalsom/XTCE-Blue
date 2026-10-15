@@ -1,6 +1,7 @@
 #ifndef PPI_H
 #define PPI_H
 
+#include "Log.h"
 #include <cstdint>
 
 class PPI
@@ -26,7 +27,7 @@ public:
                 }
                 break;
             case 1:
-                //std::cout << "PPI write port B: " << std::hex << static_cast<int>(data) << std::dec << "\n";
+                //xtce::log::debug() << "PPI write port B: " << std::hex << static_cast<int>(data) << std::dec << "\n";
                 b_ = data;
                 if (bStrobedOutput()) {
                     c_ &= 0xfc; // Clear -OFB and INTR
@@ -97,7 +98,7 @@ public:
                 }
 
                 c &= 0x3F; // Clear parity bits
-                //std::cout << "PPI read port C: " << std::hex << static_cast<int>(c) << std::dec << "\n";
+                //xtce::log::debug() << "PPI read port C: " << std::hex << static_cast<int>(c) << std::dec << "\n";
                 return c;
             }
             default:

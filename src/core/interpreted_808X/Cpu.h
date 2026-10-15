@@ -9,7 +9,7 @@
 #include <deque>
 #include <format>
 #include <iomanip>
-#include <iostream>
+#include "../Log.h"
 #include <span>
 #include <string>
 #include <sstream>
@@ -334,7 +334,7 @@ private:
         registers_[21] = 0xffff;
         registers_[23] = 0;
 
-        // std::cout << "CPU initializing." << std::endl;
+        // xtce::log::debug() << "CPU initializing." << std::endl;
 
         // Initialize the microcode data and put it in a format more suitable for interpreting
 
@@ -366,7 +366,7 @@ private:
         for (int i = 0; i < 512; ++i) {
             int w = instructions[i];
 #if DEBUG_MC
-            std::cout << std::format("{:03X}: {:021b}\n", i, static_cast<unsigned int>(w));
+            xtce::log::debug() << std::format("{:03X}: {:021b}\n", i, static_cast<unsigned int>(w));
 #endif
 
             // The microcode word is somewhat scrambled compared to the word layout diagram you may have seen in online
@@ -403,7 +403,7 @@ private:
         }
 
 #if DEBUG_MC
-        std::cout << "Instruction words loaded." << std::endl;
+        xtce::log::debug() << "Instruction words loaded." << std::endl;
 #endif
 
         // Read in the stage1 decoder PLA ROM logic.
@@ -420,7 +420,7 @@ private:
         for (int h = 0; h < 2; ++h) {
             constexpr int decoderHeight = 11;
 #if DEBUG_MC
-            std::cout << "Loading " << (h == 0 ? "top" : "bottom") << " microcode decoder" << std::endl;
+            xtce::log::debug() << "Loading " << (h == 0 ? "top" : "bottom") << " microcode decoder" << std::endl;
 #endif
             const std::string_view decoder = h == 0 ? MICROCODE_DECODER_TOP : MICROCODE_DECODER_BOTTOM;
 
@@ -475,7 +475,7 @@ private:
         // For looking up an EA calculation microcode address, the inputs are 5 bits from the ModRM byte.
 
 #if DEBUG_MC
-        std::cout << "Loading " << (use8086 ? "8086" : "8088") << " translation ROM" << std::endl;
+        xtce::log::debug() << "Loading " << (use8086 ? "8086" : "8088") << " translation ROM" << std::endl;
 #endif
         const std::string_view translationString = use8086 ? MICROCODE_TRANSLATION_8086 : MICROCODE_TRANSLATION_8088;
         int tsp = 0;
@@ -523,7 +523,7 @@ private:
             for (int j = 0; j < 256; ++j) {
                 if ((j & mask) == bits) {
 #if DEBUG_MC
-                    std::cout << "Translation output: " << std::format("{:02X}: {:014b}\n", j, output);
+                    xtce::log::debug() << "Translation output: " << std::format("{:02X}: {:014b}\n", j, output);
 #endif
                     translation_[j] = output;
                 }
@@ -613,7 +613,7 @@ private:
 
 #if DEBUG_MC
         for (int i = 0; i < 256; i++) {
-            std::cout << std::format("{:02X}:{:08X}\n", i, groups_[i]);
+            xtce::log::debug() << std::format("{:02X}:{:08X}\n", i, groups_[i]);
         }
 #endif
 
@@ -623,7 +623,7 @@ private:
 
     void sanity_check() {
         if (byte_registers_[0] != reinterpret_cast<uint8_t*>(&registers_[24])) {
-            std::cerr << "byte register pointers invalidated!" << std::endl;
+            xtce::log::error() << "byte register pointers invalidated!" << std::endl;
         }
     }
 
@@ -1167,7 +1167,7 @@ private:
                     registers_[destination_] = v;
                 }
                 else {
-                    std::cerr << "Unknown destination: " << destination_ << std::endl;
+                    xtce::log::error() << "Unknown destination: " << destination_ << std::endl;
                 }
         }
     }
@@ -1221,7 +1221,7 @@ private:
                 break;
             case 4: // RTN
                 // Normal RTN updates carry?
-                // std::cout << "Setting carry to " << carry_ << std::endl;
+                // xtce::log::debug() << "Setting carry to " << carry_ << std::endl;
                 setCF(carry_);
 
                 microcode_pointer_ = microcode_return_;
@@ -1321,7 +1321,7 @@ private:
                         (((microcode_index_[microcode_pointer_ >> 2] << 2) + (microcode_pointer_ & 3)) << 2) >> 2;
 
                     // if (mc_ptr == 0x1c5) {
-                    //     std::cout << "INT0: CF is " << (flags() & 1) << std::endl;
+                    //     xtce::log::debug() << "INT0: CF is " << (flags() & 1) << std::endl;
                     // }
 
                     if (!condition(operands_ >> 4)) {
@@ -1339,7 +1339,7 @@ private:
                     // int mc_ptr_dst =
                     // (((microcode_index_[microcode_pointer_ >> 2] << 2) +
                     //     (microcode_pointer_ & 3)) << 2) >> 2;
-                    // std::cout << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
+                    // xtce::log::debug() << std::format("Long jump/call from {:03X} to {:03X}\n", mc_ptr, mc_ptr_dst);
                     state_ = stateSingleCycleWait;
                     break;
                 }
@@ -1885,7 +1885,7 @@ private:
                     if (console_logging_) {
                         std::string line;
                         formatCycleLogEntry(entry, line);
-                        std::cout << line << std::endl;
+                        xtce::log::trace() << line << std::endl;
                     }
                     appendCycleLogEntry(std::move(entry));
                 }

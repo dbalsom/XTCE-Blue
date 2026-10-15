@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <format>
-#include <iostream>
+#include "Log.h"
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +47,8 @@ static constexpr uint8_t ST1_DATA_ERROR = 0x20;
 static constexpr uint8_t ST2_BAD_CYL = 0x02;
 static constexpr uint8_t ST3_TRACK0 = 0x10;
 static constexpr uint8_t ST3_HEAD = 0x04;
+static constexpr uint8_t ST3_READY = 0x20;
+static constexpr uint8_t ST3_WRITE_PROTECTED = 0x40;
 
 // ------------------------------ Opcodes (base) ------------------------------
 static constexpr uint8_t OPC_SPECIFY = 0x03;
@@ -140,27 +142,66 @@ public:
 
     void attachPIC(PIC* p) { pic_ = p; }
 
-    // Insert/eject a disk image (raw CHS-linear).
+    // Insert a disk image (raw CHS-linear).
     bool loadDisk(DriveIndex drv, const std::vector<uint8_t>& bytes, bool writeProtected = false) {
         if (drv >= 4) {
             return false;
         }
         auto& d = drives_[drv];
         d.image = bytes;
+        if (drv == sel_) {
+            abortDataOp();
+        }
         d.have_disk = !bytes.empty();
         d.write_protected = writeProtected;
         inferGeometry(d);
         d.ready = d.have_disk;
 
-        std::cout << std::format("FDC: Loaded disk into drive {} ({} bytes, {}C/{}H/{}S, {}-protected)\n", drv,
+        xtce::log::info() << std::format("FDC: Loaded disk into drive {} ({} bytes, {}C/{}H/{}S, {}-protected)\n", drv,
                                  bytes.size(), d.max_cylinders, d.max_heads, d.max_sectors,
                                  writeProtected ? "write" : "read-write");
         return true;
     }
 
+    bool ejectDisk(DriveIndex drv) {
+        if (!hasDisk(drv)) {
+            return false;
+        }
+        if (drv == sel_) {
+            abortDataOp();
+        }
+        auto& d = drives_[drv];
+        d.image.clear();
+        d.have_disk = false;
+        d.ready = false;
+        d.write_protected = false;
+        xtce::log::info() << std::format("FDC: Ejected disk from drive {}\n", drv);
+        return true;
+    }
+
+    [[nodiscard]] bool hasDisk(DriveIndex drv) const {
+        return drv < drives_.size() && drives_[drv].have_disk;
+    }
+
+    [[nodiscard]] bool isWriteProtected(DriveIndex drv) const {
+        return hasDisk(drv) && drives_[drv].write_protected;
+    }
+
+    bool setWriteProtected(DriveIndex drv, bool writeProtected) {
+        if (!hasDisk(drv)) {
+            return false;
+        }
+        drives_[drv].write_protected = writeProtected;
+        if (writeProtected && drv == sel_
+            && (op_.kind == OpKind::WriteDMA || op_.kind == OpKind::FormatDMA)) {
+            abortDataOp(true);
+        }
+        return true;
+    }
+
     // ------------------------------- Bus glue -------------------------------
     uint8_t readIO(const uint16_t port) {
-        // std::cout << "FDC: Read from port " << std::hex << port << std::dec << "\n";
+        // xtce::log::trace() << "FDC: Read from port " << std::hex << port << std::dec << "\n";
         switch (port) {
             case PORT_DOR:
                 // DOR is write-only
@@ -168,13 +209,13 @@ public:
             case PORT_MSR:
                 {
                     auto b = readStatusRegister();
-                    // std::cout << std::format("FDC: Read MSR: {:02X}", b) << std::endl;
+                    // xtce::log::trace() << std::format("FDC: Read MSR: {:02X}", b) << std::endl;
                     return b;
                 }
             case PORT_DATA:
                 {
                     auto b = readDataRegister();
-                    // std::cout << std::format("FDC: Read DATA: {:02X}", b) << std::endl;
+                    // xtce::log::trace() << std::format("FDC: Read DATA: {:02X}", b) << std::endl;
                     return b;
                 }
             default:
@@ -184,13 +225,13 @@ public:
     }
 
     void writeIO(const uint16_t port, const uint8_t val) {
-        // std::cout << std::format("FDC: Write to port: {:0X} value: {:02X}", port, val) << std::endl;
+        // xtce::log::trace() << std::format("FDC: Write to port: {:0X} value: {:02X}", port, val) << std::endl;
         switch (port) {
             case PORT_DOR:
-                std::cout << std::format("FDC: Write DOR: {:02X}", val) << std::endl;
+                xtce::log::trace() << std::format("FDC: Write DOR: {:02X}", val) << std::endl;
                 return writeDOR(val);
             case PORT_DATA:
-                std::cout << std::format("FDC: Write DATA: {:02X}", val) << std::endl;
+                xtce::log::trace() << std::format("FDC: Write DATA: {:02X}", val) << std::endl;
                 return writeDATA(val);
             default:
                 break;
@@ -215,7 +256,7 @@ public:
         }
 
         const size_t addr = off + dma_byte_index_;
-        // std::cout << "offset: " << addr;
+        // xtce::log::trace() << "offset: " << addr;
         const uint8_t v = (addr < d.image.size()) ? d.image[addr] : 0xFF;
         advanceByte();
         return v;
@@ -242,7 +283,7 @@ public:
     void dmaDeviceEOP() {
 
         if (bytes_left_ > 0) {
-            std::cout << std::format("FDC: DMA EOP signaled but {} bytes still left in operation!\n", bytes_left_);
+            xtce::log::warn() << std::format("FDC: DMA EOP signaled but {} bytes still left in operation!\n", bytes_left_);
         }
 
         // Complete immediately if we're mid-op
@@ -438,7 +479,7 @@ private:
             busy_ = false;
             cur_cmd_ = Command::None;
         }
-        std::cout << std::format("FDC: Data register read -> {:02X}, {} bytes left", v, fifo_out_.size()) << std::endl;
+        xtce::log::trace() << std::format("FDC: Data register read -> {:02X}, {} bytes left", v, fifo_out_.size()) << std::endl;
         return v;
     }
 
@@ -446,7 +487,7 @@ private:
         dor_ = v;
         if ((v & DOR_RESET_NOT) == 0) {
             // Reset when bit 2 is 0
-            std::cout << "FDC: Reset triggered via DOR. Beginning reset operation." << std::endl;
+            xtce::log::debug() << "FDC: Reset triggered via DOR. Beginning reset operation." << std::endl;
 
             op_ = Op{OpKind::Reset, 0};
             resetting_ = true;
@@ -482,37 +523,37 @@ private:
     void decodeOpcode(const uint8_t op) {
         switch (op & 0x1F) {
             case OPC_SPECIFY:
-                std::cout << "FDC: Command SPECIFY\n";
+                xtce::log::debug() << "FDC: Command SPECIFY\n";
                 cur_cmd_ = Command::Specify;
                 expected_bytes_ = 3;
                 break;
             case OPC_SENSE_INT:
-                std::cout << "FDC: Command SENSE INTERRUPT\n";
+                xtce::log::debug() << "FDC: Command SENSE INTERRUPT\n";
                 cur_cmd_ = Command::SenseInt;
                 expected_bytes_ = 1;
                 break;
             case OPC_CHECK_STATUS:
-                std::cout << "FDC: Command CHECK DRIVE STATUS\n";
+                xtce::log::debug() << "FDC: Command CHECK DRIVE STATUS\n";
                 cur_cmd_ = Command::CheckDriveStatus;
                 expected_bytes_ = 2;
                 break;
             case OPC_CALIBRATE:
-                std::cout << "FDC: Command CALIBRATE\n";
+                xtce::log::debug() << "FDC: Command CALIBRATE\n";
                 cur_cmd_ = Command::Calibrate;
                 expected_bytes_ = 2;
                 break;
             case OPC_SEEK:
-                std::cout << "FDC: Command SEEK\n";
+                xtce::log::debug() << "FDC: Command SEEK\n";
                 cur_cmd_ = Command::Seek;
                 expected_bytes_ = 3;
                 break;
             case OPC_READ_DATA:
-                std::cout << "FDC: Command READ DATA\n";
+                xtce::log::debug() << "FDC: Command READ DATA\n";
                 cur_cmd_ = Command::ReadData;
                 expected_bytes_ = 9;
                 break;
             case OPC_WRITE_DATA:
-                std::cout << "FDC: Command WRITE DATA\n";
+                xtce::log::debug() << "FDC: Command WRITE DATA\n";
                 cur_cmd_ = Command::WriteData;
                 expected_bytes_ = 9;
                 break;
@@ -605,7 +646,7 @@ private:
     }
 
     void handleSenseInt() {
-        std::cout << "FDC: Handling Sense Interrupt. Returning ST0=" << std::hex << static_cast<int>(st0_)
+        xtce::log::debug() << "FDC: Handling Sense Interrupt. Returning ST0=" << std::hex << static_cast<int>(st0_)
                   << " PCN=" << static_cast<int>(pcn_) << std::dec << "\n";
 
         setSenseResult(InterruptCode::Polling, sel_, drives_[sel_].cylinder);
@@ -621,6 +662,12 @@ private:
         if (drives_[drv].cylinder == 0) {
             st3 |= ST3_TRACK0;
         }
+        if (drives_[drv].ready) {
+            st3 |= ST3_READY;
+        }
+        if (drives_[drv].write_protected) {
+            st3 |= ST3_WRITE_PROTECTED;
+        }
         pushResult({st3});
     }
 
@@ -629,7 +676,7 @@ private:
         sel_ = drv;
         drives_[drv].cylinder = 0;
         setSenseResult(InterruptCode::Normal, drv, 0);
-        std::cout << "FDC: Calibrate drive " << static_cast<int>(drv) << " to cylinder 0, raising IRQ\n";
+        xtce::log::debug() << "FDC: Calibrate drive " << static_cast<int>(drv) << " to cylinder 0, raising IRQ\n";
         setIRQ(true);
         busy_ = false;
         mrq_ = true;
@@ -650,7 +697,7 @@ private:
         auto& d = drives_[sel_];
         d.cylinder = op_.C;
         setSenseResult(InterruptCode::Normal, sel_, d.cylinder);
-        std::cout << "FDC: Seek complete on drive " << static_cast<int>(sel_) << " to cylinder "
+        xtce::log::debug() << "FDC: Seek complete on drive " << static_cast<int>(sel_) << " to cylinder "
                   << static_cast<int>(d.cylinder) << ", raising IRQ\n";
         setIRQ(true);
         op_ = Op{};
@@ -660,7 +707,7 @@ private:
 
     void completeReset() {
         reset();
-        std::cout << "FDC: Reset complete. Raising IRQ" << std::endl;
+        xtce::log::debug() << "FDC: Reset complete. Raising IRQ" << std::endl;
         setIRQ(true);
         op_ = Op{};
         busy_ = false;
@@ -677,7 +724,7 @@ private:
         const uint8_t drv = DH & 3;
         const uint8_t headReq = (DH >> 2) & 1;
 
-        std::cout << std::format("FDC: Read Data cmd for drive {}, C={}, H={}, S={}, N={}, EOT={}\n",
+        xtce::log::debug() << std::format("FDC: Read Data cmd for drive {}, C={}, H={}, S={}, N={}, EOT={}\n",
                                  static_cast<int>(drv), static_cast<int>(C), static_cast<int>(H), static_cast<int>(S),
                                  static_cast<int>(N), static_cast<int>(EOT));
 
@@ -709,7 +756,7 @@ private:
         const uint8_t headReq = (DH >> 2) & 1;
         sel_ = drv;
 
-        std::cout << std::format("FDC: Write Data cmd for drive {}, C={}, H={}, S={}, N={}, EOT={}\n",
+        xtce::log::debug() << std::format("FDC: Write Data cmd for drive {}, C={}, H={}, S={}, N={}, EOT={}\n",
                                  static_cast<int>(drv), static_cast<int>(C), static_cast<int>(H), static_cast<int>(S),
                                  static_cast<int>(N), static_cast<int>(EOT));
 
@@ -719,7 +766,7 @@ private:
             return;
         }
         if (d.write_protected) {
-            std::cout << "FDC: Write Data error: disk is write-protected\n";
+            xtce::log::warn() << "FDC: Write Data error: disk is write-protected\n";
             endError(C, H, S, N, true, true);
             return;
         }
@@ -789,6 +836,18 @@ private:
     }
 
     // ------------------------------ DMA helpers ------------------------------
+    void abortDataOp(bool write_protect = false) {
+        if (op_.kind != OpKind::ReadDMA && op_.kind != OpKind::WriteDMA && op_.kind != OpKind::FormatDMA) {
+            return;
+        }
+        const auto interrupted = op_;
+        setDrq(false);
+        op_ = Op{};
+        bytes_left_ = 0;
+        endError(interrupted.C, interrupted.H, interrupted.S, interrupted.N,
+                 interrupted.kind != OpKind::ReadDMA, write_protect);
+    }
+
     void startDma(const OpKind kind, const uint8_t C, const uint8_t H, const uint8_t S, const uint8_t N,
                   const uint8_t EOT, const uint32_t bps) {
         op_ = {kind, true, 0, C, H, S, N, EOT};
@@ -797,7 +856,7 @@ private:
         dma_start_address_ = dmac_->getAddress(2);
         dma_word_count_ = dmac_->getWordCount(2) + 1; // +1 because count is words-1
 
-        std::cout << std::format("FDC: Starting DMA operation: address {:08X}, word count: {}\n", dma_start_address_,
+        xtce::log::debug() << std::format("FDC: Starting DMA operation: address {:08X}, word count: {}\n", dma_start_address_,
                                  dma_word_count_);
 
         bytes_left_ = static_cast<size_t>(bps) * static_cast<size_t>((EOT >= S) ? (EOT - S + 1) : 1);
@@ -857,11 +916,11 @@ private:
         op_ = Op{};
         d.sector = std::min<uint8_t>(lastR, d.max_sectors);
         // Signal completion via IRQ6
-        std::cout << std::format("FDC: DMA operation complete. EOP: {} Transferred {} bytes. Raising IRQ\n", eop,
+        xtce::log::debug() << std::format("FDC: DMA operation complete. EOP: {} Transferred {} bytes. Raising IRQ\n", eop,
                                  bytes_transferred_);
 
         if (irq_pending_) {
-            std::cerr << "FDC: ERROR: IRQ already pending when raising IRQ\n";
+            xtce::log::error() << "FDC: ERROR: IRQ already pending when raising IRQ\n";
         }
         setIRQ(true);
     }
@@ -869,7 +928,7 @@ private:
     void setDrq(const bool state) {
         drq_ = state;
         if (dmac_) {
-            // std::cout << "FDC: Setting DREQ2 to " << (state ? "ON" : "OFF") << std::endl;
+            // xtce::log::trace() << "FDC: Setting DREQ2 to " << (state ? "ON" : "OFF") << std::endl;
             dmac_->setDMARequestLine(2, state); /* DREQ2 */
         }
     }

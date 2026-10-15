@@ -5,7 +5,7 @@
 #include "Cga.h"
 
 #include <format>
-#include <iostream>
+#include "Log.h"
 
 
 uint8_t CGA::readIO(uint16_t address) {
@@ -68,7 +68,7 @@ void CGA::writeIO(uint16_t address, uint8_t data) {
 bool is_deferred_mode_change(uint8_t mode_byte) { return false; }
 
 void CGA::writeModeRegister(uint8_t mode_byte) {
-    // std::cout << std::format("Write to CGA mode register: {:02X}", mode_byte) << std::endl;
+    xtce::log::trace() << std::format("Write to CGA mode register: {:02X}", mode_byte) << std::endl;
     if (is_deferred_mode_change(mode_byte)) {
         // Latch the mode change and mark it pending. We will change the mode on next hsync.
         mode_pending_ = true;

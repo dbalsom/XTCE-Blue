@@ -60,6 +60,7 @@ add_library(xtce_core STATIC
     Fdc.h
     font.h
     Keyboard.h
+    Log.h
     Machine.cpp
     Machine.h
     Pic.h
