@@ -75,7 +75,7 @@ case 0x13b0:
     const uint16_t b = readOperand(op2);
     r[TB] = a;
     r[TA] = b;
-    setupAlu(decodedAluOperation, TA, false, false);
+    setupDecodedAlu<false, false>(TA);
     break;
 }
 
@@ -302,7 +302,7 @@ case 0x1352:
 case 0x13c2:
 case 0x13d2:
 {
-    setupAlu(decodedAluOperation, TA, false, false);
+    setupDecodedAlu<false, false>(TA);
     endRequested = true;
     break;
 }
@@ -370,7 +370,7 @@ case 0x11e0:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -460,7 +460,7 @@ case 0x11f1:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -519,7 +519,7 @@ case 0x1270:
 {
     const uint16_t a = r[AX];
     r[TB] = extendByte(a);
-    setupAlu(Alu::AdjustDecimal, TB, false, false);
+    setupAlu<false, false>(Alu::AdjustDecimal, TB);
     break;
 }
 
@@ -534,7 +534,7 @@ case 0x1271:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     endRequested = true;
     break;
 }
@@ -568,7 +568,7 @@ case 0x12f0:
 {
     const uint16_t a = r[AX];
     r[TB] = extendByte(a);
-    setupAlu(Alu::AdjustDecimal, TB, false, false);
+    setupAlu<false, false>(Alu::AdjustDecimal, TB);
     break;
 }
 
@@ -583,7 +583,7 @@ case 0x12f1:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     endRequested = true;
     break;
 }
@@ -617,7 +617,7 @@ case 0x1370:
 {
     const uint16_t a = r[AX];
     r[TB] = extendByte(a);
-    setupAlu(Alu::AdjustAscii, TB, false, false);
+    setupAlu<false, false>(Alu::AdjustAscii, TB);
     break;
 }
 
@@ -632,7 +632,7 @@ case 0x1371:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -651,7 +651,7 @@ case 0x1372:
     writeByteReg(0, a);
     (void)b;
     commitAluFlags();
-    setupAlu(Alu::Inc, TB, false, true);
+    setupAlu<false, true>(Alu::Inc, TB);
     break;
 }
 
@@ -715,7 +715,7 @@ case 0x13f0:
 {
     const uint16_t a = r[AX];
     r[TB] = extendByte(a);
-    setupAlu(Alu::AdjustAscii, TB, false, false);
+    setupAlu<false, false>(Alu::AdjustAscii, TB);
     break;
 }
 
@@ -730,7 +730,7 @@ case 0x13f1:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -749,7 +749,7 @@ case 0x13f2:
     writeByteReg(0, a);
     (void)b;
     commitAluFlags();
-    setupAlu(Alu::Dec, TB, false, true);
+    setupAlu<false, true>(Alu::Dec, TB);
     break;
 }
 
@@ -811,7 +811,7 @@ case 0x14f0:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, false, false);
+    setupDecodedAlu<false, false>(TB);
     endRequested = true;
     break;
 }
@@ -887,7 +887,7 @@ case 0x1570:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -1008,7 +1008,7 @@ case 0x15f1:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -1083,7 +1083,7 @@ case 0x1600:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -1167,7 +1167,7 @@ case 0x1610:
 case 0x0611:
 case 0x1611:
 {
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -1223,7 +1223,7 @@ case 0x1620:
     const uint16_t b = sigma;
     r[TC] = a;
     r[TA] = b;
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -1257,7 +1257,7 @@ case 0x1622:
 {
     const uint16_t a = readOperand(op2);
     r[TB] = a;
-    setupAlu(Alu::Sub, TC, false, false);
+    setupAlu<false, false>(Alu::Sub, TC);
     break;
 }
 
@@ -1309,7 +1309,7 @@ case 0x1625:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -1423,7 +1423,7 @@ case 0x1680:
     const uint16_t b = r[SP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -1539,7 +1539,7 @@ case 0x16b2:
 {
     const uint16_t a = readOperand(op1);
     r[TA] = a;
-    setupAlu(Alu::MulDiv, TB, false, false);
+    setupAlu<false, false>(Alu::MulDiv, TB);
     break;
 }
 
@@ -1576,7 +1576,7 @@ case 0x16a0:
     const uint16_t b = r[SP];
     r[TA] = a;
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -1802,7 +1802,7 @@ case 0x17f0:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TB] = extendByte(a);
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -2057,7 +2057,7 @@ case 0x1832:
 {
     const uint16_t a = r[TB];
     r[TA] = a;
-    setupAlu(decodedAluOperation, TA, false, false);
+    setupDecodedAlu<false, false>(TA);
     break;
 }
 
@@ -2121,7 +2121,7 @@ case 0x1850:
     const uint16_t b = readOperand(op2);
     r[TA] = a;
     r[TB] = b;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     endRequested = true;
     break;
 }
@@ -2299,7 +2299,7 @@ case 0x18f0:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TA] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -2334,7 +2334,7 @@ case 0x18f2:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[SP] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -2645,7 +2645,8 @@ case 0x19b1:
 case 0x09b3:
 case 0x19b3:
 {
-    if (interruptPending) {
+    const bool interrupt_pending = interruptPending();
+    if (interrupt_pending) {
         jumpLocal(5);
     }
     break;
@@ -2690,7 +2691,7 @@ case 0x19b6:
 {
     const uint16_t a = readPc();
     r[TB] = a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -2723,7 +2724,7 @@ case 0x19c0:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -2789,7 +2790,7 @@ case 0x19d1:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -3052,7 +3053,7 @@ case 0x0a50:
     const uint16_t b = r[SI];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3086,7 +3087,7 @@ case 0x0a52:
     const uint16_t b = r[DI];
     r[SI] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3155,10 +3156,11 @@ case 0x0a56:
 case 0x1a46:
 case 0x1a56:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[SI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -3194,7 +3196,7 @@ case 0x0a70:
     const uint16_t b = r[SI];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3277,7 +3279,7 @@ case 0x0a75:
 {
     const uint16_t a = r[TA];
     r[DI] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -3372,7 +3374,7 @@ case 0x0a92:
 case 0x1a82:
 case 0x1a92:
 {
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     endRequested = true;
     break;
 }
@@ -3408,7 +3410,7 @@ case 0x0ab0:
     const uint16_t b = r[DI];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3471,7 +3473,7 @@ case 0x0ad0:
     const uint16_t b = r[SI];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3536,7 +3538,7 @@ case 0x0af0:
     const uint16_t b = r[DI];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -3568,7 +3570,7 @@ case 0x0af2:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -3783,7 +3785,7 @@ case 0x1c10:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -3819,7 +3821,7 @@ case 0x1c12:
     const uint16_t b = sigma;
     r[LC] = a;
     (void)b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -3877,7 +3879,7 @@ case 0x1ca1:
 
     const uint16_t a = (readPrefetchForMicrocode() << 8);
     r[TB] = (r[TB] & 0xff) | (a & 0xff00);
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -3914,7 +3916,7 @@ case 0x1c24:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -3980,7 +3982,7 @@ case 0x1c30:
 case 0x0c31:
 case 0x1c31:
 {
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -4034,7 +4036,7 @@ case 0x1c40:
     const uint16_t b = sigma;
     writeOperand(op2, a);
     r[TB] = b;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -4088,7 +4090,7 @@ case 0x1c50:
     const uint16_t b = sigma;
     writeOperand(op2, a);
     r[TB] = b;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -4208,7 +4210,7 @@ case 0x1c80:
     const uint16_t b = r[SP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -4294,7 +4296,7 @@ case 0x1c91:
 {
     const uint16_t a = 2;
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -4395,7 +4397,7 @@ case 0x1cb1:
 {
     const uint16_t a = 0;
     r[TB] = a;
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -4586,7 +4588,7 @@ case 0x1d11:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -4604,7 +4606,7 @@ case 0x1d12:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, true, true);
+    setupDecodedAlu<true, true>(TB);
     break;
 }
 
@@ -4641,7 +4643,7 @@ case 0x1d30:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -4677,7 +4679,7 @@ case 0x1d32:
     const uint16_t b = sigma;
     r[LC] = a;
     (void)b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -4742,7 +4744,7 @@ case 0x1d42:
 {
     const uint16_t a = 8;
     r[LC] = a;
-    setupAlu(Alu::Sub, TC, false, false);
+    setupAlu<false, false>(Alu::Sub, TC);
     break;
 }
 
@@ -4758,7 +4760,7 @@ case 0x1d43:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Div, TC, true, false);
+    setupDiv<true, false>(TC);
     break;
 }
 
@@ -4776,7 +4778,7 @@ case 0x1d44:
     const uint16_t b = sigma;
     (void)a;
     r[TB] = b;
-    setupAlu(Alu::Div, TC, false, false);
+    setupDiv<false, false>(TC);
     break;
 }
 
@@ -4791,7 +4793,7 @@ case 0x1d45:
 {
     const uint16_t a = r[TA];
     writeByteReg(4, a);
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     endRequested = true;
     break;
 }
@@ -4844,7 +4846,7 @@ case 0x1d51:
 {
     const uint16_t a = swappedAccumulator();
     r[TB] = a;
-    setupAlu(Alu::Add, TB, false, false);
+    setupAlu<false, false>(Alu::Add, TB);
     break;
 }
 
@@ -4875,7 +4877,7 @@ case 0x1d53:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -4891,7 +4893,7 @@ case 0x1d54:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Add, TB, false, false);
+    setupAlu<false, false>(Alu::Add, TB);
     break;
 }
 
@@ -4923,7 +4925,7 @@ case 0x1d56:
     const uint16_t b = r[AX];
     writeByteReg(4, a);
     r[TA] = b;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     endRequested = true;
     break;
 }
@@ -5053,9 +5055,10 @@ case 0x1e12:
         return;
     }
 
+    const bool interrupt_pending = interruptPending();
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(4);
     }
     break;
@@ -5134,7 +5137,7 @@ case 0x1e36:
 {
     const uint16_t a = readPc();
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -5180,7 +5183,7 @@ case 0x1e20:
     const uint16_t b = r[CX];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -5247,7 +5250,7 @@ case 0x1e30:
     const uint16_t b = r[CX];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -5372,7 +5375,7 @@ case 0x1e70:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -5416,7 +5419,7 @@ case 0x1e80:
     const uint16_t b = r[SP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -5468,7 +5471,7 @@ case 0x1e83:
 {
     const uint16_t a = readPc();
     r[TB] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -5522,7 +5525,7 @@ case 0x1e90:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TB] = extendByte(a);
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -5705,7 +5708,7 @@ case 0x1eb0:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TB] = extendByte(a);
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -5839,7 +5842,7 @@ case 0x16d0:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -5855,7 +5858,7 @@ case 0x16d1:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -5919,10 +5922,11 @@ case 0x16d5:
 case 0x16c6:
 case 0x16d6:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -5956,7 +5960,7 @@ case 0x16f0:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -5972,7 +5976,7 @@ case 0x16f1:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -6051,7 +6055,8 @@ case 0x16f5:
 case 0x16e6:
 case 0x16f6:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6085,7 +6090,7 @@ case 0x1a50:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -6101,7 +6106,7 @@ case 0x1a51:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -6155,7 +6160,7 @@ case 0x1af0:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -6175,7 +6180,7 @@ case 0x1af1:
     const uint16_t b = sigma;
     r[TC] = a;
     (void)b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -6279,7 +6284,7 @@ case 0x1a77:
 {
     const uint16_t a = r[TB];
     r[SI] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -6312,7 +6317,7 @@ case 0x1a79:
     const uint16_t a = sigma;
     (void)a;
     commitAluFlags();
-    setupAlu(Alu::Add, TC, false, true);
+    setupAlu<false, true>(Alu::Add, TC);
     break;
 }
 
@@ -6325,7 +6330,8 @@ case 0x1a79:
 case 0x1a6a:
 case 0x1a7a:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6359,7 +6365,7 @@ case 0x1ab0:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -6377,7 +6383,7 @@ case 0x1ab1:
     const uint16_t b = sigma;
     r[TC] = a;
     (void)b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -6425,10 +6431,11 @@ case 0x1ab3:
 case 0x1aa4:
 case 0x1ab4:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6462,7 +6469,7 @@ case 0x1ad0:
     const uint16_t b = r[CX];
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -6480,7 +6487,7 @@ case 0x1ad1:
     const uint16_t b = sigma;
     r[TC] = a;
     (void)b;
-    setupAlu(Alu::Add, TC, false, false);
+    setupAlu<false, false>(Alu::Add, TC);
     break;
 }
 
@@ -6557,7 +6564,8 @@ case 0x1ad5:
 case 0x1ac6:
 case 0x1ad6:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6590,7 +6598,7 @@ case 0x1af4:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -6637,7 +6645,7 @@ case 0x1af7:
     const uint16_t a = sigma;
     (void)a;
     commitAluFlags();
-    setupAlu(Alu::Add, TC, false, true);
+    setupAlu<false, true>(Alu::Add, TC);
     break;
 }
 
@@ -6650,7 +6658,8 @@ case 0x1af7:
 case 0x1ae8:
 case 0x1af8:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6909,7 +6918,7 @@ case 0x2cf2:
 {
     const uint16_t a = readOperand(op1);
     r[TA] = a;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     endRequested = true;
     break;
 }
@@ -7033,7 +7042,7 @@ case 0x2d70:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, false, false);
+    setupDecodedAlu<false, false>(TB);
     break;
 }
 
@@ -7126,7 +7135,7 @@ case 0x2df0:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, false, false);
+    setupDecodedAlu<false, false>(TB);
     break;
 }
 
@@ -7222,7 +7231,7 @@ case 0x2e70:
     const uint16_t b = 0;
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -7403,7 +7412,7 @@ case 0x2e74:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -7446,7 +7455,7 @@ case 0x2e55:
 case 0x2e65:
 case 0x2e75:
 {
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -7636,7 +7645,7 @@ case 0x2ef0:
     const uint16_t b = r[AX];
     r[TA] = a;
     r[TB] = b;
-    setupAlu(Alu::MulDiv, TB, false, false);
+    setupAlu<false, false>(Alu::MulDiv, TB);
     break;
 }
 
@@ -7726,7 +7735,7 @@ case 0x2f70:
     const uint16_t b = r[AX];
     r[TC] = a;
     r[TA] = b;
-    setupAlu(Alu::Sub, TC, false, false);
+    setupAlu<false, false>(Alu::Sub, TC);
     break;
 }
 
@@ -8091,7 +8100,7 @@ case 0x2f78:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Div, TC, true, false);
+    setupDiv<true, false>(TC);
     break;
 }
 
@@ -8139,7 +8148,7 @@ case 0x2f79:
     const uint16_t b = sigma;
     (void)a;
     r[TB] = b;
-    setupAlu(Alu::Div, TC, false, false);
+    setupDiv<false, false>(TC);
     break;
 }
 
@@ -8366,7 +8375,7 @@ case 0x2ff0:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(Alu::MulDiv, TB, false, false);
+    setupAlu<false, false>(Alu::MulDiv, TB);
     break;
 }
 
@@ -8457,7 +8466,7 @@ case 0x2ff2:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TC] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -8761,7 +8770,7 @@ case 0x3cf0:
 {
     const uint16_t a = readOperand(op1);
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, false, false);
+    setupDecodedAlu<false, false>(TB);
     break;
 }
 
@@ -8889,7 +8898,7 @@ case 0x3d70:
     const uint16_t b = r[SP];
     r[TA] = a;
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -9123,7 +9132,7 @@ case 0x3df1:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TA] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -9314,7 +9323,7 @@ case 0x3ef0:
     const uint16_t b = sigma;
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -9532,7 +9541,7 @@ case 0x3ff0:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -9708,7 +9717,7 @@ case 0x4110:
     const uint16_t b = r[CX];
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9723,7 +9732,7 @@ case 0x4111:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     break;
 }
 
@@ -9757,7 +9766,7 @@ case 0x4130:
     const uint16_t b = r[CX];
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9772,7 +9781,7 @@ case 0x4131:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Not, TA, false, false);
+    setupAlu<false, false>(Alu::Not, TA);
     break;
 }
 
@@ -9788,7 +9797,7 @@ case 0x4132:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TA] = a;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     break;
 }
 
@@ -9823,7 +9832,7 @@ case 0x4150:
     const uint16_t b = r[CX];
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9838,7 +9847,7 @@ case 0x4151:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Or, TA, false, false);
+    setupAlu<false, false>(Alu::Or, TA);
     break;
 }
 
@@ -9873,7 +9882,7 @@ case 0x4170:
     const uint16_t b = r[CX];
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9888,7 +9897,7 @@ case 0x4171:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Xor, TA, false, false);
+    setupAlu<false, false>(Alu::Xor, TA);
     break;
 }
 
@@ -9928,7 +9937,7 @@ case 0x4190:
     const uint16_t b = readPrefetchForMicrocode();
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9943,7 +9952,7 @@ case 0x4191:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     break;
 }
 
@@ -9982,7 +9991,7 @@ case 0x41b0:
     const uint16_t b = readPrefetchForMicrocode();
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -9997,7 +10006,7 @@ case 0x41b1:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Not, TA, false, false);
+    setupAlu<false, false>(Alu::Not, TA);
     break;
 }
 
@@ -10013,7 +10022,7 @@ case 0x41b2:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TA] = a;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     break;
 }
 
@@ -10053,7 +10062,7 @@ case 0x41d0:
     const uint16_t b = readPrefetchForMicrocode();
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -10068,7 +10077,7 @@ case 0x41d1:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Or, TA, false, false);
+    setupAlu<false, false>(Alu::Or, TA);
     break;
 }
 
@@ -10108,7 +10117,7 @@ case 0x41f0:
     const uint16_t b = readPrefetchForMicrocode();
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::BitMask, TA, false, false);
+    setupAlu<false, false>(Alu::BitMask, TA);
     break;
 }
 
@@ -10123,7 +10132,7 @@ case 0x41f1:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Xor, TA, false, false);
+    setupAlu<false, false>(Alu::Xor, TA);
     break;
 }
 
@@ -10158,7 +10167,7 @@ case 0x4260:
 {
     const uint16_t a = r[CX];
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Inc, TA, false, false);
+    setupAlu<false, false>(Alu::Inc, TA);
     break;
 }
 
@@ -10176,7 +10185,7 @@ case 0x4261:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Shr, TB, false, false);
+    setupAlu<false, false>(Alu::Shr, TB);
     break;
 }
 
@@ -10229,7 +10238,7 @@ case 0x4224:
 case 0x4244:
 case 0x4264:
 {
-    setupAlu(Alu::Inc, TA, false, false);
+    setupAlu<false, false>(Alu::Inc, TA);
     break;
 }
 
@@ -10298,7 +10307,7 @@ case 0x4208:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Adc, TC, false, false);
+    setupAlu<false, false>(Alu::Adc, TC);
     break;
 }
 
@@ -10314,7 +10323,7 @@ case 0x4209:
     const uint16_t a = sigma;
     r[TB] = a;
     commitAluFlags();
-    setupAlu(Alu::AdjustDecimal, TB, false, true);
+    setupAlu<false, true>(Alu::AdjustDecimal, TB);
     break;
 }
 
@@ -10328,7 +10337,7 @@ case 0x420a:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -10382,7 +10391,7 @@ case 0x426d:
     const uint16_t b = r[DI];
     writeOpr(a);
     r[TA] = b;
-    setupAlu(Alu::Inc, TA, false, false);
+    setupAlu<false, false>(Alu::Inc, TA);
     break;
 }
 
@@ -10421,7 +10430,7 @@ case 0x426f:
 {
     const uint16_t a = r[CX];
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Add, TB, false, false);
+    setupAlu<false, false>(Alu::Add, TB);
     break;
 }
 
@@ -10492,7 +10501,7 @@ case 0x4273:
     const uint16_t a = sigma;
     (void)a;
     commitAluFlags();
-    setupAlu(Alu::Inc, TA, false, true);
+    setupAlu<false, true>(Alu::Inc, TA);
     break;
 }
 
@@ -10510,7 +10519,7 @@ case 0x4274:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Shr, TB, false, false);
+    setupAlu<false, false>(Alu::Shr, TB);
     break;
 }
 
@@ -10530,7 +10539,7 @@ case 0x4275:
     const uint16_t b = sigma;
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -10583,7 +10592,7 @@ case 0x4228:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Sbb, TC, false, false);
+    setupAlu<false, false>(Alu::Sbb, TC);
     break;
 }
 
@@ -10599,7 +10608,7 @@ case 0x4229:
     const uint16_t a = sigma;
     r[TB] = a;
     commitAluFlags();
-    setupAlu(Alu::AdjustDecimal, TB, false, true);
+    setupAlu<false, true>(Alu::AdjustDecimal, TB);
     break;
 }
 
@@ -10613,7 +10622,7 @@ case 0x422a:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -10648,7 +10657,7 @@ case 0x4268:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Sbb, TC, false, false);
+    setupAlu<false, false>(Alu::Sbb, TC);
     break;
 }
 
@@ -10664,7 +10673,7 @@ case 0x4269:
     const uint16_t a = sigma;
     r[TB] = a;
     commitAluFlags();
-    setupAlu(Alu::AdjustDecimal, TB, false, true);
+    setupAlu<false, true>(Alu::AdjustDecimal, TB);
     break;
 }
 
@@ -10678,7 +10687,7 @@ case 0x426a:
 {
     const uint16_t a = readK();
     r[TA] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -10735,7 +10744,7 @@ case 0x4282:
 {
     const uint16_t a = swappedAccumulator();
     r[TB] = (r[TB] & 0xff) | (a & 0xff00);
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -10750,7 +10759,7 @@ case 0x4283:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Rol12, TB, true, false);
+    setupAlu<true, false>(Alu::Rol12, TB);
     break;
 }
 
@@ -10765,7 +10774,7 @@ case 0x42a4:
 {
     const uint16_t a = r[TB];
     writeOperand(op1, a);
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -10878,7 +10887,7 @@ case 0x42a2:
 {
     const uint16_t a = swappedAccumulator();
     r[TB] = (r[TB] & 0xff) | (a & 0xff00);
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -10893,7 +10902,7 @@ case 0x42a3:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Rol12, TB, true, false);
+    setupAlu<true, false>(Alu::Rol12, TB);
     break;
 }
 
@@ -10908,7 +10917,7 @@ case 0x4390:
 {
     const uint16_t a = readOperand(op1);
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -10974,7 +10983,7 @@ case 0x4314:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -10989,7 +10998,7 @@ case 0x4315:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -11016,7 +11025,7 @@ case 0x4317:
 {
     const uint16_t a = readOperand(op2);
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Inc, TA, false, false);
+    setupAlu<false, false>(Alu::Inc, TA);
     break;
 }
 
@@ -11034,7 +11043,7 @@ case 0x4398:
     const uint16_t b = sigma;
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -11078,7 +11087,7 @@ case 0x439b:
 {
     const uint16_t a = 15;
     r[TB] = a;
-    setupAlu(Alu::And, TC, false, false);
+    setupAlu<false, false>(Alu::And, TC);
     break;
 }
 
@@ -11108,7 +11117,7 @@ case 0x439d:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     writeOperand(op1, a);
-    setupAlu(Alu::Sub, TC, false, false);
+    setupAlu<false, false>(Alu::Sub, TC);
     break;
 }
 
@@ -11141,7 +11150,7 @@ case 0x4330:
 {
     const uint16_t a = 15;
     r[TC] = a;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -11158,7 +11167,7 @@ case 0x4331:
     const uint16_t b = sigma;
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -11173,7 +11182,7 @@ case 0x4332:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[AX] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -11207,7 +11216,7 @@ case 0x43b5:
 {
     const uint16_t a = readOperand(op1);
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -11225,7 +11234,7 @@ case 0x43b6:
     const uint16_t b = sigma;
     r[TB] = a;
     r[TA] = b;
-    setupAlu(Alu::And, TA, false, false);
+    setupAlu<false, false>(Alu::And, TA);
     break;
 }
 
@@ -11241,7 +11250,7 @@ case 0x43b7:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[LC] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -11260,7 +11269,7 @@ case 0x43b8:
     r[TB] = a;
     (void)b;
     commitAluFlags();
-    setupAlu(Alu::Inc2, TB, false, true);
+    setupAlu<false, true>(Alu::Inc2, TB);
     break;
 }
 
@@ -11362,7 +11371,7 @@ case 0x43be:
 {
     const uint16_t a = r[LC];
     r[TB] = a;
-    setupAlu(Alu::Inc, TB, false, false);
+    setupAlu<false, false>(Alu::Inc, TB);
     break;
 }
 
@@ -11380,7 +11389,7 @@ case 0x43bf:
     const uint16_t b = sigma;
     r[LC] = a;
     r[TB] = b;
-    setupAlu(Alu::AdjustAscii, TB, false, false);
+    setupAlu<false, false>(Alu::AdjustAscii, TB);
     break;
 }
 
@@ -11396,7 +11405,7 @@ case 0x43c0:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -11428,7 +11437,7 @@ case 0x43c2:
 {
     const uint16_t a = 0;
     r[TC] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -11444,7 +11453,7 @@ case 0x43c3:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -11459,7 +11468,7 @@ case 0x43c4:
 {
     const uint16_t a = r[AX];
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -11507,7 +11516,7 @@ case 0x43c7:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -11538,7 +11547,7 @@ case 0x4394:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -11553,7 +11562,7 @@ case 0x4395:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -11585,7 +11594,7 @@ case 0x4397:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Inc, TA, false, false);
+    setupAlu<false, false>(Alu::Inc, TA);
     break;
 }
 
@@ -11599,7 +11608,7 @@ case 0x43b0:
 {
     const uint16_t a = 15;
     r[TC] = a;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -11632,7 +11641,7 @@ case 0x43b1:
 // -------------------------------------------------------------------------
 case 0x43b2:
 {
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -11647,7 +11656,7 @@ case 0x43b3:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[AX] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -11886,7 +11895,7 @@ case 0x6330:
 {
     const uint16_t a = readOperand(op2);
     r[TB] = a;
-    setupAlu(Alu::Inc, TB, false, false);
+    setupAlu<false, false>(Alu::Inc, TB);
     endRequested = true;
     break;
 }
@@ -11925,7 +11934,7 @@ case 0x63c0:
 {
     const uint16_t a = readOperand(op2);
     r[TB] = a;
-    setupAlu(Alu::Inc, TB, false, false);
+    setupAlu<false, false>(Alu::Inc, TB);
     break;
 }
 
@@ -12011,7 +12020,7 @@ case 0x63d0:
 {
     const uint16_t a = readOperand(op2);
     r[TB] = a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -12197,7 +12206,7 @@ case 0x61f1:
 {
     const uint16_t a = r[AX];
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -12215,7 +12224,7 @@ case 0x61f2:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, true, true);
+    setupDecodedAlu<true, true>(TB);
     break;
 }
 
@@ -12252,7 +12261,7 @@ case 0x6390:
     const uint16_t b = r[BX];
     r[TA] = a;
     r[TB] = b;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -12320,7 +12329,7 @@ case 0x63b0:
 {
     const uint16_t a = readOperand(op2);
     r[TB] = a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     endRequested = true;
     break;
 }
@@ -12357,7 +12366,7 @@ case 0x6220:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -12421,7 +12430,7 @@ case 0x6270:
 {
     const uint16_t a = r[AX];
     r[TA] = a;
-    setupAlu(Alu::AdjustDecimal, TA, false, false);
+    setupAlu<false, false>(Alu::AdjustDecimal, TA);
     break;
 }
 
@@ -12435,7 +12444,7 @@ case 0x6271:
 {
     const uint16_t a = readK();
     r[TB] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     endRequested = true;
     break;
 }
@@ -12534,7 +12543,7 @@ case 0x62f0:
 {
     const uint16_t a = r[AX];
     r[TA] = a;
-    setupAlu(Alu::Not, TA, false, false);
+    setupAlu<false, false>(Alu::Not, TA);
     endRequested = true;
     break;
 }
@@ -12568,7 +12577,7 @@ case 0x6320:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -13071,7 +13080,7 @@ case 0x6bf0:
     const uint16_t b = r[AX];
     r[TA] = a;
     r[TB] = b;
-    setupAlu(decodedAluOperation, TA, false, false);
+    setupDecodedAlu<false, false>(TA);
     break;
 }
 
@@ -13310,7 +13319,7 @@ case 0x6f85:
 {
     const uint16_t a = r[BP];
     r[TA] = a;
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -13387,7 +13396,7 @@ case 0x6d10:
 case 0x6c11:
 case 0x6d11:
 {
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -13612,7 +13621,7 @@ case 0x6fc0:
     const uint16_t b = r[BP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -13761,7 +13770,7 @@ case 0x6d50:
 {
     const uint16_t a = r[BP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -13837,7 +13846,7 @@ case 0x6fe0:
     const uint16_t b = r[AX];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(decodedAluOperation, TA, false, false);
+    setupDecodedAlu<false, false>(TA);
     break;
 }
 
@@ -13881,7 +13890,7 @@ case 0x6ff0:
 {
     const uint16_t a = r[BP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -13980,7 +13989,7 @@ case 0x6c91:
 {
     const uint16_t a = r[BP];
     r[TA] = a;
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -14033,7 +14042,7 @@ case 0x6cd0:
     const uint16_t b = r[BP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -14118,7 +14127,7 @@ case 0x6d30:
 
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -14241,7 +14250,7 @@ case 0x6e10:
 // -------------------------------------------------------------------------
 case 0x6e11:
 {
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -14306,7 +14315,7 @@ case 0x6e31:
     const uint16_t b = r[BP];
     r[BX] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -14352,7 +14361,7 @@ case 0x6e50:
 {
     const uint16_t a = r[BP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -14514,7 +14523,7 @@ case 0x6f13:
     const uint16_t b = r[AX];
     r[TA] = (r[TA] & 0xff) | (a & 0xff00);
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -14546,7 +14555,7 @@ case 0x6f15:
     const uint16_t b = r[BP];
     r[TA] = (r[TA] & 0xff) | (a & 0xff00);
     r[TB] = b;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -14590,7 +14599,7 @@ case 0x6f50:
     const uint16_t b = r[BP];
     r[TA] = uint8_t(a);
     r[TB] = b;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -14810,7 +14819,7 @@ case 0x7030:
     const uint16_t b = 0;
     writeSegment(DS, a);
     r[TB] = b;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -14892,7 +14901,7 @@ case 0x7035:
 // -------------------------------------------------------------------------
 case 0x7080:
 {
-    setupAlu(Alu::Inc2, TA, false, false);
+    setupAlu<false, false>(Alu::Inc2, TA);
     break;
 }
 
@@ -15006,7 +15015,7 @@ case 0x7180:
 {
     const uint16_t a = 0;
     r[TB] = (r[TB] & 0xff) | (a & 0xff00);
-    setupAlu(Alu::Add, TB, false, false);
+    setupAlu<false, false>(Alu::Add, TB);
     break;
 }
 
@@ -15056,7 +15065,7 @@ case 0x7183:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Inc2, TB, false, false);
+    setupAlu<false, false>(Alu::Inc2, TB);
     break;
 }
 
@@ -15104,7 +15113,7 @@ case 0x7186:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -15326,7 +15335,7 @@ case 0x7200:
 {
     const uint16_t a = r[TA];
     r[TB] = a;
-    setupAlu(Alu::Add, TB, false, false);
+    setupAlu<false, false>(Alu::Add, TB);
     break;
 }
 
@@ -15344,7 +15353,7 @@ case 0x7201:
     (void)a;
     r[TB] = b;
     commitAluFlags();
-    setupAlu(Alu::Adc, TC, false, true);
+    setupAlu<false, true>(Alu::Adc, TC);
     break;
 }
 
@@ -15445,7 +15454,7 @@ case 0x7382:
     const uint16_t b = 0;
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -15492,7 +15501,7 @@ case 0x7385:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -15522,7 +15531,7 @@ case 0x7386:
 case 0x7307:
 case 0x7387:
 {
-    setupAlu(Alu::Neg, TA, false, false);
+    setupAlu<false, false>(Alu::Neg, TA);
     break;
 }
 
@@ -15539,7 +15548,7 @@ case 0x7388:
     const uint16_t a = sigma;
     r[TA] = a;
     commitAluFlags();
-    setupAlu(Alu::Neg, TB, false, true);
+    setupAlu<false, true>(Alu::Neg, TB);
     break;
 }
 
@@ -15567,7 +15576,7 @@ case 0x7389:
 case 0x730a:
 case 0x738a:
 {
-    setupAlu(Alu::Not, TB, false, false);
+    setupAlu<false, false>(Alu::Not, TB);
     break;
 }
 
@@ -15682,7 +15691,7 @@ case 0x7400:
 {
     const uint16_t a = r[CX];
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -15699,7 +15708,7 @@ case 0x7401:
     const uint16_t b = sigma;
     r[TB] = a;
     (void)b;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -15725,7 +15734,8 @@ case 0x7402:
 // -------------------------------------------------------------------------
 case 0x7403:
 {
-    if (interruptPending) {
+    const bool interrupt_pending = interruptPending();
+    if (interrupt_pending) {
         jumpLocal(5);
     }
     break;
@@ -15767,7 +15777,7 @@ case 0x7406:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -15813,7 +15823,7 @@ case 0x7481:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(decodedAluOperation, TB, true, true);
+    setupDecodedAlu<true, true>(TB);
     break;
 }
 
@@ -15876,7 +15886,7 @@ case 0x7501:
 {
     const uint16_t a = 0;
     r[TB] = (r[TB] & 0xff) | (a & 0xff00);
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -15891,7 +15901,7 @@ case 0x7502:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -15922,7 +15932,7 @@ case 0x7504:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     (void)a;
-    setupAlu(Alu::Dec, TB, false, false);
+    setupAlu<false, false>(Alu::Dec, TB);
     break;
 }
 
@@ -15954,7 +15964,7 @@ case 0x7506:
 {
     const uint16_t a = r[BP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -16031,7 +16041,7 @@ case 0x750b:
 {
     const uint16_t a = r[SP];
     r[TB] = a;
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -16080,7 +16090,7 @@ case 0x750e:
     const uint16_t b = r[SP];
     r[BP] = a;
     r[TB] = b;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     endRequested = true;
     break;
 }
@@ -16553,7 +16563,7 @@ case 0x7681:
     latchOprFromRead();
     const uint16_t a = r[CS];
     writeOpr(a);
-    setupAlu(Alu::Dec2, TB, false, false);
+    setupAlu<false, false>(Alu::Dec2, TB);
     break;
 }
 
@@ -16665,7 +16675,7 @@ case 0x7701:
 {
     const uint16_t a = 16;
     r[TB] = a;
-    setupAlu(Alu::Sub, TA, false, false);
+    setupAlu<false, false>(Alu::Sub, TA);
     break;
 }
 
@@ -16708,7 +16718,7 @@ case 0x7704:
     const uint16_t b = r[AX];
     r[TC] = a;
     r[TB] = b;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -16723,7 +16733,7 @@ case 0x7705:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -16737,7 +16747,7 @@ case 0x7706:
 {
     const uint16_t a = r[DI];
     r[TC] = a;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -16779,7 +16789,7 @@ case 0x7709:
 {
     const uint16_t a = readOperand(op1);
     r[TA] = uint8_t(a);
-    setupAlu(Alu::Inc2, TC, false, false);
+    setupAlu<false, false>(Alu::Inc2, TC);
     break;
 }
 
@@ -16794,7 +16804,7 @@ case 0x770a:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -16870,7 +16880,7 @@ case 0x7710:
 {
     const uint16_t a = readOpr();
     r[TA] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -16885,7 +16895,7 @@ case 0x7711:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Mul, TC, true, false);
+    setupMul<true, false>(TC);
     break;
 }
 
@@ -16940,7 +16950,7 @@ case 0x7715:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TB] = a;
-    setupAlu(Alu::Pass, TB, false, false);
+    setupAlu<false, false>(Alu::Pass, TB);
     break;
 }
 
@@ -16955,7 +16965,7 @@ case 0x7716:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Shr, TB, true, false);
+    setupAlu<true, false>(Alu::Shr, TB);
     break;
 }
 
@@ -16969,7 +16979,7 @@ case 0x7717:
 {
     const uint16_t a = r[TA];
     r[LC] = a;
-    setupAlu(Alu::Pass, TC, false, false);
+    setupAlu<false, false>(Alu::Pass, TC);
     break;
 }
 
@@ -17013,7 +17023,7 @@ case 0x771a:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Div, TC, true, false);
+    setupDiv<true, false>(TC);
     break;
 }
 
@@ -17043,7 +17053,7 @@ case 0x7780:
 {
     const uint16_t a = r[AX];
     r[TA] = a;
-    setupAlu(Alu::Neg, TA, false, false);
+    setupAlu<false, false>(Alu::Neg, TA);
     break;
 }
 
@@ -17075,7 +17085,7 @@ case 0x7782:
     const uint16_t a = sigma;
     r[TA] = a;
     commitAluFlags();
-    setupAlu(Alu::Neg, TB, false, true);
+    setupAlu<false, true>(Alu::Neg, TB);
     break;
 }
 
@@ -17101,7 +17111,7 @@ case 0x7783:
 // -------------------------------------------------------------------------
 case 0x7784:
 {
-    setupAlu(Alu::Not, TB, false, false);
+    setupAlu<false, false>(Alu::Not, TB);
     break;
 }
 
@@ -17127,7 +17137,7 @@ case 0x7785:
 // -------------------------------------------------------------------------
 case 0x7786:
 {
-    setupAlu(Alu::Sub, TC, false, false);
+    setupAlu<false, false>(Alu::Sub, TC);
     break;
 }
 
@@ -17159,7 +17169,7 @@ case 0x7800:
     latchOprFromRead();
     const uint16_t a = readOpr();
     r[TC] = a;
-    setupAlu(Alu::Add, TA, false, false);
+    setupAlu<false, false>(Alu::Add, TA);
     break;
 }
 
@@ -17247,7 +17257,7 @@ case 0x7902:
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[TB] = a;
-    setupAlu(Alu::Div, TC, true, false);
+    setupDiv<true, false>(TC);
     break;
 }
 
@@ -17264,7 +17274,7 @@ case 0x7903:
     const uint16_t b = sigma;
     (void)a;
     r[TB] = b;
-    setupAlu(Alu::Div, TC, false, false);
+    setupDiv<false, false>(TC);
     break;
 }
 
@@ -17278,7 +17288,7 @@ case 0x7904:
 {
     const uint16_t a = r[TB];
     r[TC] = a;
-    setupAlu(Alu::Pass, TA, false, false);
+    setupAlu<false, false>(Alu::Pass, TA);
     break;
 }
 
@@ -17296,7 +17306,7 @@ case 0x7905:
     r[TB] = a;
     (void)b;
     commitAluFlags();
-    setupAlu(Alu::Neg, TA, false, true);
+    setupAlu<false, true>(Alu::Neg, TA);
     break;
 }
 
@@ -17350,7 +17360,7 @@ case 0x7908:
 // -------------------------------------------------------------------------
 case 0x7909:
 {
-    setupAlu(Alu::Neg, TC, false, false);
+    setupAlu<false, false>(Alu::Neg, TC);
     break;
 }
 
