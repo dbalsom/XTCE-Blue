@@ -240,7 +240,7 @@ public:
     Alu decodedAluOperation = Alu::Pass;
     uint8_t opcode = 0, modrm = 0, prefixCount = 0;
     bool wordSize = true, endRequested = false;
-    bool busyPin = false, interruptPending = false;
+    bool busyPin = false;
     uint16_t k = 0xffff, microAddress = 0;
     uint64_t clocks = 0, microSteps = 0;
     bool instructionStarted = false, instructionDone = false;
@@ -499,6 +499,7 @@ public:
     void waitForQueue(unsigned bytes) {
         waiting_queue_bytes_ = bytes;
         micro_state_ = MicroState::WaitingForQueueData;
+        eu_suspended_ = true;
     }
 
     void latchOprFromRead() {
@@ -574,6 +575,7 @@ public:
 
     // Complete the prefetch queue flush
     void completePrefetchFlush(uint16_t target, bool from_operand, bool from_alu) {
+        eu_suspended_ = false;
         // RETF and far indirect JMP load CS from OPR before the FLUSH word.
         // A CS transfer from a temporary does not use this operand pipeline.
         from_operand |= cs_transfer_pending_ && clocks - cs_clock_ < 3;
@@ -639,7 +641,11 @@ public:
 
     bool decrementLoopCounter() { return --r[LC] != 0; }
 
-    bool repeatCondition() {
+    bool interruptPending() const {
+        return !interrupt_delay_ && (nmi_pending_ || (intr_line_ && (r[FLAGS] & IF)));
+    }
+
+    bool repeatCondition(bool interrupt_pending) {
         if (!decrementLoopCounter()) {
             return false;
         }
@@ -648,7 +654,7 @@ public:
             return bool(r[FLAGS] & ZF) == bool(opcode & 1);
         }
 
-        if (interruptPending) {
+        if (interrupt_pending) {
             return false;
         }
 
@@ -972,6 +978,7 @@ public:
             return true;
         }
         micro_state_ = MicroState::WaitingForOperand;
+        eu_suspended_ = true;
         return false;
     }
 
@@ -981,6 +988,7 @@ public:
             return true;
         }
         micro_state_ = MicroState::WaitingForRequestSlot;
+        eu_suspended_ = true;
         return false;
     }
 
@@ -998,7 +1006,6 @@ private:
         bus.setPassiveOrHalt(t_state_ == TState::TIdle || halted_);
         const bool intr = bus.interruptPending();
         intr_line_ = intr;
-        interruptPending = !interrupt_delay_ && (nmi_pending_ || (intr && (r[FLAGS] & IF) != 0));
         if (!single_instruction_ && !instructionStarted) {
             if (!interrupt_delay_) {
                 if (nmi_pending_) {
@@ -1024,8 +1031,14 @@ private:
 
         // A completed fetch crosses the BIU/EU queue pipeline before the
         // decoder can consume it: T4 data becomes available on the next T2.
-        if (prefetch_publish_delay_ && !--prefetch_publish_delay_) {
-            publishPrefetch();
+        if (prefetch_publish_delay_) {
+            --prefetch_publish_delay_;
+            // Microcode can consume the pending fetch at delay == 1, before
+            // the decoder sees it in the prefetch queue at delay == 0.
+            eu_suspended_ = false;
+            if (!prefetch_publish_delay_) {
+                publishPrefetch();
+            }
         }
 
         if (Capture) {
@@ -1108,6 +1121,7 @@ private:
 
     Loader loader_ = Loader::Opcode;
     Eu eu_ = Eu::Running;
+    bool eu_suspended_ = false;
     MicroState micro_state_ = MicroState::Running;
     bool micro_branch_delay_ = false;
     bool operand_busy_at_e_ = false;
@@ -1211,6 +1225,7 @@ private:
 
     // Insert a byte into the prefetch queue. Throws if the queue is full.
     void enqueue(uint8_t value) {
+        eu_suspended_ = false;
         if (prefetch_count_ >= queueCapacity()) {
             throw std::logic_error("queue overflow");
         }
@@ -1412,6 +1427,7 @@ private:
 
     // Reset state for the next instruction, leaving the registers and flags intact.
     void clearInstructionState() {
+        eu_suspended_ = false;
         loader_ = Loader::Opcode;
         eu_ = Eu::Running;
         micro_state_ = MicroState::Running;
@@ -1469,6 +1485,7 @@ private:
     // Request retirement of the current instruction if the EU is able to do so.
     void finishInstruction() {
         if (request_pending_ || flush_pending_) {
+            eu_suspended_ = true;
             return;
         }
         if (single_instruction_) {
@@ -1480,9 +1497,33 @@ private:
         retireInstruction();
     }
 
+    bool resumeMicrocode() {
+        if (micro_state_ == MicroState::WaitingForQueueData) {
+            if (microcodePrefetchBytes() < waiting_queue_bytes_) {
+                return false;
+            }
+        }
+        if (micro_state_ == MicroState::WaitingForOperand && request_pending_ && !read_count_ &&
+            !request_write_accepted_ && eu_ != Eu::SupplyingWriteData) {
+            return false;
+        }
+        if (micro_state_ == MicroState::WaitingForRequestSlot && request_queued_) {
+            return false;
+        }
+
+        write_waited_ = micro_state_ == MicroState::WaitingForOperand && request_write_accepted_;
+        micro_state_ = MicroState::Running;
+
+        return true;
+    }
+
     // Execute one tick of the EU, handling microcode and instruction progression.
     template <bool Capture>
     void tickEu() {
+        // BIU completion, data supply and prefetch publication wake the EU.
+        if (eu_suspended_) {
+            return;
+        }
         if (alu_repeat_delay_) {
             alu_repeat_delay_ = false;
             return;
@@ -1491,25 +1532,18 @@ private:
             micro_branch_delay_ = false;
             return;
         }
-        if (micro_state_ == MicroState::WaitingForQueueData) {
-            if (microcodePrefetchBytes() < waiting_queue_bytes_) {
-                return;
-            }
+        if (micro_state_ == MicroState::Running) {
+            write_waited_ = false;
         }
-        if (micro_state_ == MicroState::WaitingForOperand && request_pending_ && !read_count_ &&
-            !request_write_accepted_ && eu_ != Eu::SupplyingWriteData) {
+        else if (!resumeMicrocode()) {
+            eu_suspended_ = true;
             return;
         }
-        if (micro_state_ == MicroState::WaitingForRequestSlot && request_queued_) {
-            return;
-        }
-
-        write_waited_ = micro_state_ == MicroState::WaitingForOperand && request_write_accepted_;
-        micro_state_ = MicroState::Running;
 
         switch (loader_) {
             case Loader::Opcode:
                 if (!prefetch_count_ || queue_status_) {
+                    eu_suspended_ = !prefetch_count_;
                     return;
                 }
 
@@ -1552,6 +1586,7 @@ private:
 
             case Loader::Modrm:
                 if (!prefetch_count_) {
+                    eu_suspended_ = true;
                     return;
                 }
 
@@ -1585,6 +1620,7 @@ private:
                 // EA setup inserts a queue-idle clock before the last displacement
                 // byte. If the queue is empty, that clock occurs after the queue is written.
                 if (!prefetch_count_) {
+                    eu_suspended_ = true;
                     displacement_stalled_ = true;
                     return;
                 }
@@ -1593,6 +1629,7 @@ private:
 
             case Loader::Displacement:
                 if (!prefetch_count_) {
+                    eu_suspended_ = true;
                     return;
                 }
 
@@ -1635,6 +1672,9 @@ private:
                     latchOprFromRead();
                     loader_ = Loader::Execute;
                 }
+                else {
+                    eu_suspended_ = true;
+                }
                 return;
 
             case Loader::Finish:
@@ -1643,6 +1683,7 @@ private:
 
             case Loader::NextOpcode:
                 if (!prefetch_count_ || queue_status_) {
+                    eu_suspended_ = !prefetch_count_;
                     return;
                 }
                 // Consume the boundary indication without executing the next
@@ -1779,6 +1820,7 @@ private:
     }
 
     void supplyWriteData() {
+        eu_suspended_ = false;
         write_data_ = r[OPR];
         write_data_ready_ = true;
         opr_valid_ = false;
@@ -1818,217 +1860,235 @@ private:
         if (request_queued_ && queued_request_delay_) {
             --queued_request_delay_;
         }
-        const bool request_ready = request_delay_ == 0;
-        // After a write, a pending write takes priority over refilling the
-        // last queue slot even before its address pipeline has completed.
-        const bool request_reserved = request_pending_ &&
-            (request_delay_ <= request_reserve_delay_ ||
-             (active_request_.write && bus_write_ && !bus_prefetch_ &&
-              prefetch_count_ + pending_prefetch_bytes_ >= queueCapacity() - 1));
-
+        // Arbitration uses the delay sampled before this clock's decrement.
+        const unsigned request_delay = request_delay_;
         if (request_delay_) {
             --request_delay_;
         }
-
-        // Handle prefetch decision
         if (t_state_ == TState::TIdle) {
-            if (request_pending_ && request_ready && bus_idle_clocks_ != 1) {
-                // EU request pending, initiate bus cycle for it
-                bus_prefetch_ = false;
-                bus_write_ = active_request_.write;
-                bus_io_ = active_request_.io;
-                bus_address_ = (active_request_.base + uint16_t(active_request_.offset + request_bytes_completed_)) &
-                    (bus_io_ ? 0xffff : 0xfffff);
-                bus_bytes_ =
-                    model_ == Model::V30 && !(bus_address_ & 1) && active_request_.bytes - request_bytes_completed_ >= 2
-                    ? 2
-                    : 1;
-                bus_segment_ = active_request_.segment;
-
-                bus_inta_ = active_request_.inta;
-                t_state_ = TState::T1;
+            startBusCycle(fetch_ready, request_delay);
+            if (t_state_ == TState::TIdle) {
+                // A missed back-to-back transfer requires two idle clocks.
+                if (bus_idle_clocks_ < 2) {
+                    ++bus_idle_clocks_;
+                }
+                return;
             }
-            else if (fetch_ready && !prefetch_suspended_ && !request_reserved &&
-                     prefetch_count_ + pending_prefetch_bytes_ < queueCapacity() && !eaReservesBus()) {
-                // Prefetch qualified, initiate prefetch bus cycle
-                bus_prefetch_ = true;
-                bus_write_ = bus_io_ = bus_inta_ = false;
-                bus_address_ = ((uint32_t(r[CS]) << 4) + pfp_) & 0xfffff;
-                bus_bytes_ = model_ == Model::V30 && !(pfp_ & 1) &&
-                        prefetch_count_ + pending_prefetch_bytes_ + 2 <= queueCapacity()
-                    ? 2
-                    : 1;
-                bus_segment_ = CS;
-                bus_generation_ = fetch_generation_;
-                t_state_ = TState::T1;
-            }
-        }
-
-        if (t_state_ == TState::TIdle) {
-            // For some reason we didn't start a prefetch or bus cycle.
-            // Once a request misses the back-to-back transfer boundary, the
-            // BIU arbitration interval occupies two idle clocks.
-            // I believe this is analagous to the 8088's t0 and tc cycles.
-            if (bus_idle_clocks_ < 2) {
-                ++bus_idle_clocks_;
-            }
-            return;
+            bhe_pin_ = model_ == Model::V30 && bus_bytes_ == 1 && !(bus_address_ & 1);
         }
         bus_idle_clocks_ = 0;
 
-        // Present stable write data even while READY is low. The motherboard
-        // may need it to finish data conversion before releasing READY.
-        if ((t_state_ == TState::T3 || t_state_ == TState::TWait) && bus_write_) {
-            if (!write_data_ready_) {
-                supplyWriteData();
-            }
-            bus_value_ = uint16_t(write_data_ >> (request_bytes_completed_ * 8));
-            bus.driveWriteData(bus_value_);
-        }
-        const bool ready = bus.ready();
-        bhe_pin_ = model_ == Model::V30 && bus_bytes_ == 1 && !(bus_address_ & 1);
         static constexpr uint8_t segmentStatus[] = {0, 2, 1, 3};
+        switch (t_state_) {
+            case TState::T1:
+                if constexpr (Capture) {
+                    captureBus(bus.ready());
+                }
+                bus.startAccess(bus_address_, bus_bytes_, bus_prefetch_, bus_io_, bus_write_, bus_inta_);
+                multiplexed_ = bus_address_;
+                t_state_ = TState::T2;
+                break;
 
-        // Capture pins, if specified. This is expensive to do on every clock,
-        // so it is only done when requested.
-        if (Capture) {
-            pins.t = t_state_;
-            pins.ready = ready;
-            pins.ale = t_state_ == TState::T1;
-            pins.bhe = bhe_pin_;
-            pins.address = bus_address_;
-            pins.status = t_state_ <= TState::T2 ? (bus_inta_           ? 0
-                                                        : bus_prefetch_ ? 4
-                                                        : bus_io_       ? (bus_write_ ? 2 : 1)
-                                                                        : (bus_write_ ? 6 : 5))
-                                                 : 7;
-            pins.segment = t_state_ == TState::T1 ? 4 : segmentStatus[bus_segment_];
-            const uint8_t strobe = t_state_ == TState::T2               ? (bus_write_ ? 2 : 4)
-                : (t_state_ == TState::T3 || t_state_ == TState::TWait) ? (bus_write_ ? 3 : 4)
-                                                                        : 0;
-            pins.memory = bus_io_ || bus_inta_ ? 0 : strobe;
-            pins.io = bus_io_ || bus_inta_ ? strobe : 0;
-        }
+            case TState::T2:
+                if constexpr (Capture) {
+                    captureBus(bus.ready());
+                }
+                if (bus_inta_) {
+                    // BUSLOCK spans T2 of the first INTA through T2 of the second.
+                    // Count physical cycles: V20 splits one request; V30 issues two.
+                    interrupt_lock_ = !interrupt_lock_;
+                    bus.setLock(locked_ || interrupt_lock_);
+                    if (Capture) {
+                        pins.lock = locked_ || interrupt_lock_;
+                    }
+                }
+                multiplexed_ =
+                    (bus_address_ & 0xffff) | (uint32_t(segmentStatus[bus_segment_]) << 16) | (r[FLAGS] & IF ? 0x40000 : 0);
 
-        // Execute current T-state
-        if (t_state_ == TState::T1) {
-            bus.startAccess(bus_address_, bus_bytes_, bus_prefetch_, bus_io_, bus_write_, bus_inta_);
-            multiplexed_ = bus_address_;
-        }
-        else if (t_state_ == TState::T2) {
-            if (bus_inta_) {
-                // BUSLOCK spans T2 of the first INTA through T2 of the second.
-                // Count physical cycles: V20 splits one request; V30 issues two.
-                interrupt_lock_ = !interrupt_lock_;
-                bus.setLock(locked_ || interrupt_lock_);
+                if (bus_write_) {
+                    driveDataPins(uint16_t((write_data_ready_ ? write_data_ : r[OPR]) >> (request_bytes_completed_ * 8)));
+                    if (write_data_ready_) {
+                        bus.driveWriteData(uint16_t(write_data_ >> (request_bytes_completed_ * 8)));
+                    }
+                }
+                t_state_ = TState::T3;
+                break;
+
+            case TState::T3:
+            case TState::TWait:
+            {
+                // Supply write data before READY: ISA conversion may need it
+                // to complete the transfer and release the CPU.
+                if (bus_write_) {
+                    if (!write_data_ready_) {
+                        supplyWriteData();
+                    }
+                    bus_value_ = uint16_t(write_data_ >> (request_bytes_completed_ * 8));
+                    bus.driveWriteData(bus_value_);
+                }
+                const bool ready = bus.ready();
+                if constexpr (Capture) {
+                    captureBus(ready);
+                }
+                if (bus_write_) {
+                    driveDataPins(bus_value_);
+                }
+                if (!ready) {
+                    t_state_ = TState::TWait;
+                    return;
+                }
+                if (bus_write_) {
+                    bus.write(bus_address_, bus_value_, bus_bytes_, bus_io_, clocks);
+                    // The EU can proceed once the final write is accepted at T3;
+                    // the BIU retains its transfer state through T4.
+                    request_write_accepted_ = request_bytes_completed_ + bus_bytes_ == active_request_.bytes;
+                    eu_suspended_ = false;
+                }
+                else if (bus_inta_) {
+                    bus_value_ = bus.acknowledge();
+                }
+                else {
+                    bus_value_ = bus.read(bus_address_, bus_bytes_, bus_prefetch_, bus_io_, clocks);
+                }
+
+                const uint16_t driven = driveDataPins(bus_value_);
                 if (Capture) {
-                    pins.lock = locked_ || interrupt_lock_;
+                    pins.data = driven;
                 }
+                t_state_ = TState::T4;
+                break;
             }
-            multiplexed_ =
-                (bus_address_ & 0xffff) | (uint32_t(segmentStatus[bus_segment_]) << 16) | (r[FLAGS] & IF ? 0x40000 : 0);
 
-            if (bus_write_) {
-                driveDataPins(uint16_t((write_data_ready_ ? write_data_ : r[OPR]) >> (request_bytes_completed_ * 8)));
-                if (write_data_ready_) {
-                    bus.driveWriteData(uint16_t(write_data_ >> (request_bytes_completed_ * 8)));
+            case TState::T4:
+                if constexpr (Capture) {
+                    captureBus(bus.ready());
                 }
-            }
+                completeBusCycle();
+                break;
+
+            case TState::TIdle:
+                break;
         }
-        else if (t_state_ == TState::T3 || t_state_ == TState::TWait) {
-            if (bus_write_) {
-                driveDataPins(bus_value_);
-            }
-            if (!ready) {
-                t_state_ = TState::TWait;
-                return;
-            }
-            if (bus_write_) {
-                bus.write(bus_address_, bus_value_, bus_bytes_, bus_io_, clocks);
-                // The EU can proceed once the final write is accepted at T3;
-                // the BIU retains its transfer state through T4.
-                request_write_accepted_ = request_bytes_completed_ + bus_bytes_ == active_request_.bytes;
-            }
-            else if (bus_inta_) {
-                bus_value_ = bus.acknowledge();
-            }
-            else {
-                bus_value_ = bus.read(bus_address_, bus_bytes_, bus_prefetch_, bus_io_, clocks);
-            }
+    }
 
-            const uint16_t driven = driveDataPins(bus_value_);
-            if (Capture) {
-                pins.data = driven;
-            }
+    void startBusCycle(bool fetch_ready, unsigned request_delay) {
+        const bool request_ready = request_delay == 0;
+        // After a write, a pending write takes priority over refilling the
+        // last queue slot even before its address pipeline has completed.
+        const bool request_reserved = request_pending_ &&
+            (request_delay <= request_reserve_delay_ ||
+             (active_request_.write && bus_write_ && !bus_prefetch_ &&
+              prefetch_count_ + pending_prefetch_bytes_ >= queueCapacity() - 1));
+
+        if (request_pending_ && request_ready && bus_idle_clocks_ != 1) {
+            // EU request pending, initiate bus cycle for it
+            bus_prefetch_ = false;
+            bus_write_ = active_request_.write;
+            bus_io_ = active_request_.io;
+            bus_address_ = (active_request_.base + uint16_t(active_request_.offset + request_bytes_completed_)) &
+                (bus_io_ ? 0xffff : 0xfffff);
+            bus_bytes_ =
+                model_ == Model::V30 && !(bus_address_ & 1) && active_request_.bytes - request_bytes_completed_ >= 2
+                ? 2
+                : 1;
+            bus_segment_ = active_request_.segment;
+
+            bus_inta_ = active_request_.inta;
+            t_state_ = TState::T1;
         }
+        else if (fetch_ready && !prefetch_suspended_ && !request_reserved &&
+                 prefetch_count_ + pending_prefetch_bytes_ < queueCapacity() && !eaReservesBus()) {
+            // Prefetch qualified, initiate prefetch bus cycle
+            bus_prefetch_ = true;
+            bus_write_ = bus_io_ = bus_inta_ = false;
+            bus_address_ = ((uint32_t(r[CS]) << 4) + pfp_) & 0xfffff;
+            bus_bytes_ = model_ == Model::V30 && !(pfp_ & 1) &&
+                    prefetch_count_ + pending_prefetch_bytes_ + 2 <= queueCapacity()
+                ? 2
+                : 1;
+            bus_segment_ = CS;
+            bus_generation_ = fetch_generation_;
+            t_state_ = TState::T1;
+        }
+    }
 
-        if (t_state_ == TState::T4) {
-            if (bus_prefetch_) {
-                if (bus_generation_ == fetch_generation_) {
-                    pending_prefetch_data_ = bus_value_;
-                    pending_prefetch_bytes_ = bus_bytes_;
-                    prefetch_publish_delay_ = 2;
-                    pfp_ += bus_bytes_;
-                    if (fetch_restart_pending_) {
-                        fetch_restart_pending_ = false;
-                        prefetch_start_delay_ = 3;
-                    }
+    void captureBus(bool ready) {
+        static constexpr uint8_t segmentStatus[] = {0, 2, 1, 3};
+        pins.t = t_state_;
+        pins.ready = ready;
+        pins.ale = t_state_ == TState::T1;
+        pins.bhe = bhe_pin_;
+        pins.address = bus_address_;
+        pins.status = t_state_ <= TState::T2 ? (bus_inta_           ? 0
+                                                    : bus_prefetch_ ? 4
+                                                    : bus_io_       ? (bus_write_ ? 2 : 1)
+                                                                    : (bus_write_ ? 6 : 5))
+                                             : 7;
+        pins.segment = t_state_ == TState::T1 ? 4 : segmentStatus[bus_segment_];
+        const uint8_t strobe = t_state_ == TState::T2               ? (bus_write_ ? 2 : 4)
+            : (t_state_ == TState::T3 || t_state_ == TState::TWait) ? (bus_write_ ? 3 : 4)
+                                                                    : 0;
+        pins.memory = bus_io_ || bus_inta_ ? 0 : strobe;
+        pins.io = bus_io_ || bus_inta_ ? strobe : 0;
+    }
+
+    void completeBusCycle() {
+        eu_suspended_ = false;
+        if (bus_prefetch_) {
+            if (bus_generation_ == fetch_generation_) {
+                pending_prefetch_data_ = bus_value_;
+                pending_prefetch_bytes_ = bus_bytes_;
+                prefetch_publish_delay_ = 2;
+                pfp_ += bus_bytes_;
+                if (fetch_restart_pending_) {
+                    fetch_restart_pending_ = false;
+                    prefetch_start_delay_ = 3;
                 }
             }
-            else {
-                if (!bus_write_) {
-                    request_read_data_ |= uint16_t(bus_value_ << (request_bytes_completed_ * 8));
-                }
-
-                request_bytes_completed_ += bus_bytes_;
-
-                if (request_bytes_completed_ == active_request_.bytes) {
-                    if (!bus_write_) {
-                        if (read_count_ == read_results_.size()) {
-                            unsupported("memory result queue overflow");
-                        }
-
-                        read_results_[(read_head_ + read_count_) % read_results_.size()] = request_read_data_;
-                        ++read_count_;
-                    }
-
-                    request_pending_ = false;
-
-                    if (request_queued_) {
-                        request_queued_ = false;
-                        if (queued_forward_read_) {
-                            // A following write can reserve the BIU before
-                            // its source read returns (MOVS, INS and OUTS).
-                            latchOprFromRead();
-                            queued_write_data_ = r[OPR];
-                            queued_write_data_ready_ = true;
-                        }
-                        beginRequest(queued_request_);
-                        request_delay_ = queued_request_delay_;
-                        request_reserve_delay_ = 1;
-
-                        if (active_request_.write && queued_write_data_ready_) {
-                            write_data_ = queued_write_data_;
-                            write_data_ready_ = true;
-                            opr_valid_ = false;
-                            eu_ = Eu::Running;
-                        }
-                    }
-                }
-            }
-
-            t_state_ = TState::TIdle;
-        }
-        else if (t_state_ == TState::T1) {
-            t_state_ = TState::T2;
-        }
-        else if (t_state_ == TState::T2) {
-            t_state_ = TState::T3;
         }
         else {
-            // T3 or the final READY wait completes the data phase.
-            t_state_ = TState::T4;
+            if (!bus_write_) {
+                request_read_data_ |= uint16_t(bus_value_ << (request_bytes_completed_ * 8));
+            }
+
+            request_bytes_completed_ += bus_bytes_;
+
+            if (request_bytes_completed_ == active_request_.bytes) {
+                if (!bus_write_) {
+                    if (read_count_ == read_results_.size()) {
+                        unsupported("memory result queue overflow");
+                    }
+
+                    read_results_[(read_head_ + read_count_) % read_results_.size()] = request_read_data_;
+                    ++read_count_;
+                }
+
+                request_pending_ = false;
+
+                if (request_queued_) {
+                    request_queued_ = false;
+                    if (queued_forward_read_) {
+                        // A following write can reserve the BIU before
+                        // its source read returns (MOVS, INS and OUTS).
+                        latchOprFromRead();
+                        queued_write_data_ = r[OPR];
+                        queued_write_data_ready_ = true;
+                    }
+                    beginRequest(queued_request_);
+                    request_delay_ = queued_request_delay_;
+                    request_reserve_delay_ = 1;
+
+                    if (active_request_.write && queued_write_data_ready_) {
+                        write_data_ = queued_write_data_;
+                        write_data_ready_ = true;
+                        opr_valid_ = false;
+                        eu_ = Eu::Running;
+                    }
+                }
+            }
         }
+
+        t_state_ = TState::TIdle;
     }
 
     // Drive the data pins with the specified value, taking into account the bus width and alignment.

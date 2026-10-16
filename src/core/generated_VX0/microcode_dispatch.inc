@@ -2645,7 +2645,8 @@ case 0x19b1:
 case 0x09b3:
 case 0x19b3:
 {
-    if (interruptPending) {
+    const bool interrupt_pending = interruptPending();
+    if (interrupt_pending) {
         jumpLocal(5);
     }
     break;
@@ -3155,10 +3156,11 @@ case 0x0a56:
 case 0x1a46:
 case 0x1a56:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[SI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -5053,9 +5055,10 @@ case 0x1e12:
         return;
     }
 
+    const bool interrupt_pending = interruptPending();
     const uint16_t a = readPrefetchForMicrocode();
     r[TA] = uint8_t(a);
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(4);
     }
     break;
@@ -5919,10 +5922,11 @@ case 0x16d5:
 case 0x16c6:
 case 0x16d6:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6051,7 +6055,8 @@ case 0x16f5:
 case 0x16e6:
 case 0x16f6:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6325,7 +6330,8 @@ case 0x1a79:
 case 0x1a6a:
 case 0x1a7a:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6425,10 +6431,11 @@ case 0x1ab3:
 case 0x1aa4:
 case 0x1ab4:
 {
+    const bool interrupt_pending = interruptPending();
     const uint16_t sigma = evaluateAlu();
     const uint16_t a = sigma;
     r[DI] = a;
-    if (repeatCondition()) {
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6557,7 +6564,8 @@ case 0x1ad5:
 case 0x1ac6:
 case 0x1ad6:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -6650,7 +6658,8 @@ case 0x1af7:
 case 0x1ae8:
 case 0x1af8:
 {
-    if (repeatCondition()) {
+    const bool interrupt_pending = interruptPending();
+    if (repeatCondition(interrupt_pending)) {
         jumpLocal(3);
     }
     break;
@@ -15725,7 +15734,8 @@ case 0x7402:
 // -------------------------------------------------------------------------
 case 0x7403:
 {
-    if (interruptPending) {
+    const bool interrupt_pending = interruptPending();
+    if (interrupt_pending) {
         jumpLocal(5);
     }
     break;
