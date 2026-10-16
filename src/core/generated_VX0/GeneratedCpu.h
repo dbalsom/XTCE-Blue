@@ -5,18 +5,25 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include "cpu_types.h"
-#include "execution_control.h"
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include "cpu_types.h"
+#include "execution_control.h"
+
+// Keep ALU setup shared between dispatch cases to limit generated code size.
+#if defined(_MSC_VER)
+#define MARTY_NEC_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define MARTY_NEC_NOINLINE __attribute__((noinline))
+#else
+#define MARTY_NEC_NOINLINE
+#endif
 
 namespace marty::nec
 {
 
-// NEC datapath and bus sequencer. Microinstructions exist only as generated
-// switch cases; this class has no microcode word/selector decoder.
 class GeneratedCpu final : public ::cpu::ExecutionControl
 {
 public:
@@ -131,49 +138,25 @@ public:
     static const InstructionInfo opcodeDecodeTable[1024];
     static const Alu xiBanks[][8];
 
-    Model model() const {
-        return model_;
-    }
-    Alu currentAluOperation() const {
-        return alu_operation_;
-    }
+    Model model() const { return model_; }
+    Alu currentAluOperation() const { return alu_operation_; }
     const char* microcodeDisassembly(uint16_t address) const;
     // Debugger/diagnostic lookup only; execution switches on the full address.
     uint16_t microcodeListingLine(uint16_t address) const;
-    uint16_t currentLine() const {
-        return microcodeListingLine(last_micro_address_);
-    }
-    bool nativeMode() const {
-        return (r[FLAGS] & MF) != 0;
-    }
-    bool halted() const {
-        return halted_;
-    }
+    uint16_t currentLine() const { return microcodeListingLine(last_micro_address_); }
+    bool nativeMode() const { return (r[FLAGS] & MF) != 0; }
+    bool halted() const { return halted_; }
     void setNmiLine(bool level) {
         nmi_pending_ = nmi_pending_ || (level && !nmi_line_);
         nmi_line_ = level;
     }
-    bool instructionBoundary() const {
-        return !instructionStarted;
-    }
-    uint16_t instructionPointer() const {
-        return instruction_start_ip_;
-    }
-    uint16_t instructionSegment() const {
-        return instruction_start_cs_;
-    }
-    uint16_t nextInstructionPointer() const {
-        return r[IP];
-    }
-    uint64_t instructionCount() const {
-        return instruction_count_;
-    }
-    size_t queueCapacity() const {
-        return model_ == Model::V20 ? 4 : 6;
-    }
-    uint8_t queueStatus() const {
-        return queue_status_;
-    }
+    bool instructionBoundary() const { return !instructionStarted; }
+    uint16_t instructionPointer() const { return instruction_start_ip_; }
+    uint16_t instructionSegment() const { return instruction_start_cs_; }
+    uint16_t nextInstructionPointer() const { return r[IP]; }
+    uint64_t instructionCount() const { return instruction_count_; }
+    size_t queueCapacity() const { return model_ == Model::V20 ? 4 : 6; }
+    uint8_t queueStatus() const { return queue_status_; }
     const char* executionState() const {
         if (halted_) {
             return "Halted";
@@ -197,6 +180,7 @@ public:
 
 #include "microcode_conditions.inc"
 
+
     void enterEmulation() {
         mode_flag_writable_ = true;
         r[FLAGS] &= ~MF;
@@ -205,9 +189,7 @@ public:
         mode_flag_writable_ = false;
         r[FLAGS] |= MF;
     }
-    void deferInterrupt() {
-        interrupt_delay_ = 2;
-    }
+    void deferInterrupt() { interrupt_delay_ = 2; }
     void requestInterruptAcknowledge() {
         wordSize = true;
         const BiuRequest request{0, 0, 2, 0, false, false, true};
@@ -236,9 +218,7 @@ public:
         int microcodePointer = -1;
         bool ale = false, bhe = false, lock = false, qs0 = false, qs1 = false;
 
-        uint8_t queueStatus() const {
-            return uint8_t(qs0) | (uint8_t(qs1) << 1);
-        }
+        uint8_t queueStatus() const { return uint8_t(qs0) | (uint8_t(qs1) << 1); }
     };
 
     struct Operand
@@ -295,9 +275,7 @@ public:
     }
 
     // Read a byte from the specified index in the register file.
-    uint8_t readByteReg(unsigned index) const {
-        return uint8_t(r[AX + (index & 3)] >> ((index & 4) ? 8 : 0));
-    }
+    uint8_t readByteReg(unsigned index) const { return uint8_t(r[AX + (index & 3)] >> ((index & 4) ? 8 : 0)); }
 
     // Write a byte to the specified index in the register file.
     void writeByteReg(unsigned index, uint16_t value) {
@@ -321,9 +299,7 @@ public:
     }
 
     // Return the byte-swapped value of AX
-    uint16_t swappedAccumulator() const {
-        return uint16_t((r[AX] << 8) | (r[AX] >> 8));
-    }
+    uint16_t swappedAccumulator() const { return uint16_t((r[AX] << 8) | (r[AX] >> 8)); }
 
     // Return the value of the source 'K', an operation-dependent constant.
     uint16_t readK() {
@@ -433,9 +409,7 @@ public:
     }
 
     // Return the step size for the direction flag (DF) in the FLAGS register
-    uint16_t directionStep() const {
-        return uint16_t((r[FLAGS] & DF) ? -(wordSize ? 2 : 1) : (wordSize ? 2 : 1));
-    }
+    uint16_t directionStep() const { return uint16_t((r[FLAGS] & DF) ? -(wordSize ? 2 : 1) : (wordSize ? 2 : 1)); }
 
     // Install an initial set of bytes into the prefetch queue, simulating a prefetch.
     // Used for SingleStepTest execution.
@@ -463,9 +437,7 @@ public:
     }
 
     // Return the number of bytes currently in the prefetch queue.
-    size_t queueSize() const {
-        return prefetch_count_;
-    }
+    size_t queueSize() const { return prefetch_count_; }
 
     // Return the number of prefetched bytes currently visible to microcode.
     size_t microcodePrefetchBytes() const {
@@ -490,9 +462,7 @@ public:
     }
 
     // Peek at a byte in the prefetch queue without consuming it.
-    uint8_t queueByte(size_t index) const {
-        return prefetch_queue_[(prefetch_head_ + index) % prefetch_queue_.size()];
-    }
+    uint8_t queueByte(size_t index) const { return prefetch_queue_[(prefetch_head_ + index) % prefetch_queue_.size()]; }
 
     // Read a byte from the prefetch queue, consuming it.
     uint8_t readQueue(bool first = false) {
@@ -564,9 +534,7 @@ public:
     // Execute SUSP to suspend prefetching.
     // The BIU sees SUSP after two clocks; its acknowledgement reaches
     // the EU one clock later. An already selected fetch can still start.
-    void suspendPrefetch() {
-        suspend_delay_ = 3;
-    }
+    void suspendPrefetch() { suspend_delay_ = 3; }
 
     // Return if the prefetch queue is ready to be flushed, optionally waiting
     // for the BIU to acknowledge.
@@ -652,38 +620,24 @@ public:
         micro_branch_delay_ = !write_waited_;
     }
 
-    bool aluCarry() const {
-        return (alu_flags_ & CF) != 0;
-    }
+    bool aluCarry() const { return (alu_flags_ & CF) != 0; }
 
-    bool aluZero() const {
-        return alu_zero_;
-    }
+    bool aluZero() const { return alu_zero_; }
 
-    bool aluLess() const {
-        return bool(alu_flags_ & SF) != bool(alu_flags_ & OF);
-    }
+    bool aluLess() const { return bool(alu_flags_ & SF) != bool(alu_flags_ & OF); }
 
-    void captureArithmeticSign() {
-        result_negative_ = absolute_negative_ != bool(r[TB] & (wordSize ? 0x8000 : 0x80));
-    }
+    void captureArithmeticSign() { result_negative_ = absolute_negative_ != bool(r[TB] & (wordSize ? 0x8000 : 0x80)); }
 
     void beginDecimalString() {
         r[FLAGS] &= ~CF;
         result_negative_ = true;
     }
 
-    void accumulateDecimalZero() {
-        result_negative_ = result_negative_ && aluZero();
-    }
+    void accumulateDecimalZero() { result_negative_ = result_negative_ && aluZero(); }
 
-    bool nonnegativeResult() const {
-        return !result_negative_;
-    }
+    bool nonnegativeResult() const { return !result_negative_; }
 
-    bool decrementLoopCounter() {
-        return --r[LC] != 0;
-    }
+    bool decrementLoopCounter() { return --r[LC] != 0; }
 
     bool repeatCondition() {
         if (!decrementLoopCounter()) {
@@ -709,52 +663,80 @@ public:
         return true;
     }
 
-    void setupAlu(Alu operation, Reg temporary, bool alu_repeat, bool writeFlags = false) {
-        if (alu_repeat && operation == Alu::Mul) {
+    template <bool alu_repeat, bool writeFlags = false>
+    MARTY_NEC_NOINLINE void setupMul(Reg temporary) {
+        if constexpr (alu_repeat) {
             // SIGMA supplies the candidate partial sum. A's low bit selects
             // that sum or the unmodified partial product before B:A shifts.
             const uint32_t mask = wordSize ? 0xffff : 0xff;
-            const uint32_t sign = wordSize ? 0x8000 : 0x80;
             const uint32_t high = (r[TA] & 1) ? (r[TB] & mask) | (aluCarry() ? mask + 1 : 0) : alu_old_tmp_b_ & mask;
-            r[TA] = uint16_t(((r[TA] & mask) >> 1) | ((high & 1) ? sign : 0));
+            // Working model for V20WIDTH's physical V20 captures: byte MUL
+            // shifts both bytes of A independently, feeding B bit 0 into
+            // bits 7 and 15. Do not discard A's upper byte on each step.
+            const uint32_t shift_mask = wordSize ? 0x7fff : 0x7f7f;
+            const uint32_t incoming_mask = wordSize ? 0x8000 : 0x8080;
+            r[TA] = uint16_t(((r[TA] >> 1) & shift_mask) | ((high & 1) ? incoming_mask : 0));
             r[TB] = uint16_t(high >> 1);
         }
+        setupAlu<alu_repeat, writeFlags>(Alu::Mul, temporary);
+    }
 
-        if (operation == Alu::Div) {
-            const uint32_t mask = wordSize ? 0xffff : 0xff;
-            const uint32_t sign = wordSize ? 0x8000 : 0x80;
-            division_negative_ = aluCarry();
+    template <bool alu_repeat, bool writeFlags = false>
+    MARTY_NEC_NOINLINE void setupDiv(Reg temporary) {
+        const uint32_t mask = wordSize ? 0xffff : 0xff;
+        const uint32_t sign = wordSize ? 0x8000 : 0x80;
+        division_negative_ = aluCarry();
 
-            if (alu_repeat && alu_operation_ == Alu::Pass) {
+        if constexpr (alu_repeat) {
+            if (alu_operation_ == Alu::Pass) {
                 r[TB] = alu_old_tmp_b_;
             }
 
-            if (alu_repeat) {
-                const int32_t partial = int32_t(r[TB] & mask) - (division_negative_ ? int32_t(mask + 1) : 0);
-                const int32_t shifted = partial * 2 + ((r[TA] & sign) ? 1 : 0);
-                division_high_ = shifted - int32_t(uint32_t(shifted) & mask);
-                r[TB] = uint16_t(uint32_t(shifted) & mask);
-            }
-            else if (division_negative_) {
-                r[TB] = uint16_t((r[TB] + r[temporary]) & mask);
-            }
-
-            r[TA] = uint16_t(((r[TA] << 1) | !division_negative_) & mask);
+            const int32_t partial = int32_t(r[TB] & mask) - (division_negative_ ? int32_t(mask + 1) : 0);
+            const int32_t shifted = partial * 2 + ((r[TA] & sign) ? 1 : 0);
+            division_high_ = shifted - int32_t(uint32_t(shifted) & mask);
+            r[TB] = uint16_t(uint32_t(shifted) & mask);
+        }
+        else if (division_negative_) {
+            r[TB] = uint16_t((r[TB] + r[temporary]) & mask);
         }
 
+        r[TA] = uint16_t(((r[TA] << 1) | !division_negative_) & mask);
+        setupAlu<alu_repeat, writeFlags>(Alu::Div, temporary);
+    }
+
+    template <bool alu_repeat, bool writeFlags = false>
+    MARTY_NEC_NOINLINE void setupDecodedAlu(Reg temporary) {
+        if constexpr (alu_repeat) {
+            if (decodedAluOperation == Alu::Mul) {
+                setupMul<alu_repeat, writeFlags>(temporary);
+                return;
+            }
+        }
+        if (decodedAluOperation == Alu::Div) {
+            setupDiv<alu_repeat, writeFlags>(temporary);
+            return;
+        }
+        setupAlu<alu_repeat, writeFlags>(decodedAluOperation, temporary);
+    }
+
+    // MUL/DIV preparation must observe the previous ALU state before this latch.
+    template <bool alu_repeat, bool writeFlags = false>
+    MARTY_NEC_NOINLINE void setupAlu(Alu operation, Reg temporary) {
         alu_operation_ = operation;
         alu_temporary_ = temporary;
         alu_commit_flags_on_sigma_ = alu_repeat && writeFlags;
 
-        if (alu_repeat && --r[LC] != 0) {
-            next_micro_address_ = microAddress;
-        }
-        else if (alu_repeat &&
-                 (operation == Alu::Rol12 || (!writeFlags && operation >= Alu::Rol && operation <= Alu::Sar))) {
-            r[temporary] = evaluateAlu();
-        }
-        if (alu_repeat && !r[LC]) {
-            alu_repeat_delay_ = true;
+        if constexpr (alu_repeat) {
+            if (--r[LC] != 0) {
+                next_micro_address_ = microAddress;
+            }
+            else if (operation == Alu::Rol12 || (!writeFlags && operation >= Alu::Rol && operation <= Alu::Sar)) {
+                r[temporary] = evaluateAlu();
+            }
+            if (!r[LC]) {
+                alu_repeat_delay_ = true;
+            }
         }
     }
 
@@ -937,14 +919,10 @@ public:
     }
 
     // Commit the internal ALU flags to the FLAGS register.
-    void commitAluFlags() {
-        r[FLAGS] = (r[FLAGS] & ~alu_flag_mask_) | (alu_flags_ & alu_flag_mask_);
-    }
+    void commitAluFlags() { r[FLAGS] = (r[FLAGS] & ~alu_flag_mask_) | (alu_flags_ & alu_flag_mask_); }
 
     // Request a read from the bus unit.
-    void requestRead(Segment segment) {
-        requestTransfer(segment, false);
-    }
+    void requestRead(Segment segment) { requestTransfer(segment, false); }
 
     // Request a write to the bus unit.
     void requestWrite(Segment segment, unsigned delay = 2) {
@@ -1318,12 +1296,12 @@ private:
         // interrupt stack and is used by BRKEM, CALLN and RETEM microcode.
         const bool pair = (opcode < 0x40 && ((opcode & 7) == 1 || (opcode & 7) == 3 || (opcode & 0xe7) == 2)) ||
             (opcode & 0xcf) == 0xc1 || (opcode & 0xcf) == 0xc5;
-        
-            if (pair) {
+
+        if (pair) {
             static constexpr uint8_t pairs[] = {1, 2, 3, 5};
             op2 = {Operand::Kind::Word, pairs[(opcode >> 4) & 3]};
         }
-        
+
         static constexpr Alu arithmetic[] = {Alu::Add, Alu::Adc, Alu::Sub, Alu::Sbb,
                                              Alu::And, Alu::Xor, Alu::Or,  Alu::Cmp};
         decodedAluOperation = arithmetic[(opcode >> 3) & 7];
@@ -1919,10 +1897,10 @@ private:
             pins.ale = t_state_ == TState::T1;
             pins.bhe = bhe_pin_;
             pins.address = bus_address_;
-            pins.status = t_state_ <= TState::T2 ? (bus_inta_       ? 0
+            pins.status = t_state_ <= TState::T2 ? (bus_inta_           ? 0
                                                         : bus_prefetch_ ? 4
-                                                        : bus_io_   ? (bus_write_ ? 2 : 1)
-                                                                    : (bus_write_ ? 6 : 5))
+                                                        : bus_io_       ? (bus_write_ ? 2 : 1)
+                                                                        : (bus_write_ ? 6 : 5))
                                                  : 7;
             pins.segment = t_state_ == TState::T1 ? 4 : segmentStatus[bus_segment_];
             const uint8_t strobe = t_state_ == TState::T2               ? (bus_write_ ? 2 : 4)
@@ -2052,7 +2030,7 @@ private:
             t_state_ = TState::T4;
         }
     }
-    
+
     // Drive the data pins with the specified value, taking into account the bus width and alignment.
     uint16_t driveDataPins(uint16_t value) {
         const unsigned shift = model_ == Model::V30 && (bus_address_ & 1) ? 8 : 0;
@@ -2065,3 +2043,5 @@ private:
 };
 
 } // namespace marty::nec
+
+#undef MARTY_NEC_NOINLINE
