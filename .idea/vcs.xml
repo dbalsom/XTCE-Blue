@@ -27,6 +27,12 @@
     <mapping directory="$PROJECT_DIR$/SDL_image/external/zlib" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/SDL_mixer" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/SDL_mixer/external/flac" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth/gcem" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth/test/manual" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth/test/manual/SoundFont-Spec-Test" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth/test/manual/sf2/ANMP-data" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/SDL_mixer/external/fluidsynth/test/manual/sf2/GeneralUser-GS" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/SDL_mixer/external/libgme" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/SDL_mixer/external/libxmp" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/SDL_mixer/external/mpg123" vcs="Git" />

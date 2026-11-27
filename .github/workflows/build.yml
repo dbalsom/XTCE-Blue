@@ -76,6 +76,11 @@ jobs:
           - name: Build
             run: cmake --build build --target install --config Release
 
+          - name: Check macOS app bundle
+            run: |
+                plutil -lint build/release/xtce-blue.app/Contents/Info.plist
+                build/release/xtce-blue.app/Contents/MacOS/xtce-blue --benchmark
+
           - name: Create DMG
             run: | 
                 cd build
